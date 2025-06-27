@@ -27,18 +27,21 @@ async function onMessage(sock, msg, db, commands, prefix, isOwner) {
     } else {
       isAdmin = isOwner;
     }
-    if (command.adminOnly && !isAdmin) {
+    // Role akses check
+    let akses = db.isAkses(sender.split('@')[0]);
+    let role = db.getRole(sender.split('@')[0]);
+    // .addakses tetap hanya admin/owner
+    if (command.name === 'addakses' && !isAdmin) {
       await sock.sendMessage(from, { text: 'Hanya admin/owner yang bisa pakai command ini.' }, { quoted: msg });
       return;
     }
-    // Akses whitelist check
-    let akses = db.isAkses(sender.split('@')[0]);
-    if (['addbabu','deletebabu','addakses','addtxt'].includes(command.name) && !isAdmin && !akses) {
+    // Command dengan adminOnlyAkses: true -> admin, owner, atau role akses
+    if (command.adminOnlyAkses && !isAdmin && role !== 'akses') {
       await sock.sendMessage(from, { text: 'Kamu tidak punya akses ke fitur ini.' }, { quoted: msg });
       return;
     }
     // Context
-    const ctx = { sock, msg, db, args, user: sender, isGroup, isAdmin, isOwner };
+    const ctx = { sock, msg, db, args, user: sender, isGroup, isAdmin, isOwner, role };
     await command.execute(ctx);
   } catch (e) {
     console.error('Handler error:', e);

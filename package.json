@@ -1,0 +1,30 @@
+{
+  "name": "bot-genz",
+  "version": "1.0.1",
+  "description": "Bot manage babu",
+  "main": "index.js",
+  "scripts": {
+    "start": "node genz.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Fortoises/bot-genz.git"
+  },
+  "author": "Fixsed",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Fortoises/bot-genz/issues"
+  },
+  "homepage": "https://github.com/Fortoises/bot-genz#readme",
+  "dependencies": {
+    "@whiskeysockets/baileys": "github:nstar-y/Bail",
+    "awesome-phonenumber": "^7.5.0",
+    "better-sqlite3": "^12.1.1",
+    "chalk": "^4.1.2",
+    "cheerio": "^1.1.0",
+    "dotenv": "^16.6.0",
+    "fuse.js": "^7.1.0",
+    "jimp": "^0.16.13",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
