@@ -99,6 +99,5 @@ TELEGRAM_CHAT_ID=isi_chat_id_disini
 - Nomor owner bot (tanpa +, pisahkan dengan koma jika lebih dari satu, contoh: 6281234567890)
 ## License
 
-[LICENSE]
-(https://github.com/Fortoises/genz-cc/blob/main/LICENSE)
+[LICENSE](https://github.com/Fortoises/genz-cc/blob/main/LICENSE)
 
