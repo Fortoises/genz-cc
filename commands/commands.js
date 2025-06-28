@@ -12,8 +12,6 @@ if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
   telegramBot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
 }
 
-const prefix = process.env.PREFIX || '.';
-
 // ===== Cooldown System =====
 const COOLDOWN = parseInt(process.env.COOLDOWN, 10) || 3; // detik
 const cooldownMap = {};
@@ -36,6 +34,8 @@ function onlyCooldown(user, command) {
   return getCooldown(user, command) > 0;
 }
 
+const prefix = process.env.PREFIX || '.';
+
 function generateBabuTxt(db) {
   const list = db.db.prepare('SELECT * FROM babu ORDER BY rownum ASC').all();
   let text = '';
@@ -50,7 +50,7 @@ function generateBackupCaption(db, operation = '', jumlah = 0, totalOverride = n
   const waktu = now.toLocaleString('id-ID', { hour12: false });
   let opText = '';
   if (operation) {
-  const opMap = {
+      const opMap = {
       add: '➕ *Penambahan*',
       delete: '➖ *Penghapusan*',
       import: '✅ *Import*',
@@ -60,7 +60,6 @@ function generateBackupCaption(db, operation = '', jumlah = 0, totalOverride = n
   const total = totalOverride !== null ? totalOverride : db.countBabu();
   return `📜 *List Babu*\n🎲 *Total:* ${total}${opText}\n🕛 ${waktu}`;
 }
-
 
 async function backupToTelegram(db, operation = '', jumlah = 0) {
   if (!telegramBot) return;
@@ -139,7 +138,7 @@ async function sendBabuList(sock, from, db, msg) {
 }
 
 module.exports = [
-  {
+{
     name: 'addbabu',
     description: 'Tambah komunitas ke daftar babu',
     role: ['owner', 'admin', 'akses'],
@@ -509,6 +508,22 @@ module.exports = [
       const mentions = participants.map(p => p.id);
       const text = args.length ? args.join(' ') : '';
       await sock.sendMessage(from, { text, mentions }, { quoted: msg });
+    }
+  },
+  {
+    name: 'sourcecode',
+    description: 'Dapatkan link source code bot ini di GitHub',
+    role: ['public'],
+    execute: async (ctx) => {
+      const { sock, msg } = ctx;
+      const from = msg.key.remoteJid;
+      const githubUrl = 'https://github.com/Fortoises/genz-cc'; // Ganti dengan link repo kamu jika perlu
+      const text = `*🔱 Source Code Bot Genz*\n\n` +
+        `Bot ini open source!\n` +
+        `Kamu bisa cek, pelajari, atau kontribusi di GitHub:\n\n` +
+        `${githubUrl}\n\n` +
+        `Jangan lupa kasih 🌟 ya!`;
+      await sock.sendMessage(from, { text, linkPreview: true }, { quoted: msg });
     }
   }
 ];
