@@ -6,7 +6,9 @@ async function onMessage(sock, msg, db, commands, prefix, isOwner) {
     if (!msg.message || !msg.key) return;
     const from = msg.key.remoteJid;
     const isGroup = from.endsWith('@g.us');
-    const sender = isGroup ? msg.key.participant : msg.key.remoteJid;
+    const sender = isGroup ? (msg.key.participant || msg.participant || msg.key.remoteJid) : msg.key.remoteJid;
+    if (!sender) return;
+    const senderId = sender.split('@')[0];
     const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
     if (!text.startsWith(prefix)) return;
     const [cmdName, ...args] = text.slice(prefix.length).trim().split(/\s+/);
@@ -25,10 +27,10 @@ async function onMessage(sock, msg, db, commands, prefix, isOwner) {
       if (groupAdmins.includes(sender)) {
         userRoles = ['admin', 'akses', 'public'];
         isAdmin = true;
-      } else if (db.isAkses(sender.split('@')[0])) {
+      } else if (db.isAkses(senderId)) {
         userRoles = ['akses', 'public'];
       }
-    } else if (db.isAkses(sender.split('@')[0])) {
+    } else if (db.isAkses(senderId)) {
       userRoles = ['akses', 'public'];
     }
 
@@ -38,12 +40,30 @@ async function onMessage(sock, msg, db, commands, prefix, isOwner) {
       return;
     }
 
+    // ===== COOLDOWN CHECK =====
+    const { onlyCooldown, getCooldown, setCooldown, COOLDOWN } = command;
+    if (onlyCooldown && onlyCooldown(senderId, command.name)) {
+      const sisa = getCooldown(senderId, command.name);
+      await sock.sendMessage(from, { text: `Tunggu ${sisa} detik sebelum menggunakan command ini lagi.` }, { quoted: msg });
+      return;
+    }
+
     // Context
-    const ctx = { sock, msg, db, args, user: sender, isGroup, isAdmin, isOwner, userRoles };
+    const ctx = { sock, msg, db, args, user: sender, isGroup, isAdmin, isOwner, userRoles, onlyCooldown, getCooldown, setCooldown, COOLDOWN };
     await command.execute(ctx);
+    if (setCooldown) setCooldown(senderId, command.name, COOLDOWN);
   } catch (e) {
     console.error('Handler error:', e);
   }
 }
 
-module.exports = { onMessage }; 
+// Helper: cek apakah bot admin di grup
+function isBotAdmin(sock, from, metadata) {
+  const getNumber = jid => (jid.match(/\d+/) ? jid.match(/\d+/)[0] : jid);
+  const groupAdmins = metadata.participants.filter(p => p.admin).map(p => p.id);
+  const groupAdminNumbers = groupAdmins.map(getNumber);
+  const botNumber = getNumber(sock.user.id);
+  return groupAdminNumbers.includes(botNumber);
+}
+
+module.exports = { onMessage, isBotAdmin }; 

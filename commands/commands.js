@@ -3,12 +3,37 @@ const fs = require('fs');
 const TelegramBot = require('node-telegram-bot-api');
 require('dotenv').config();
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { isBotAdmin } = require('../handler/handler');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 let telegramBot = null;
 if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
   telegramBot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
+}
+
+const prefix = process.env.PREFIX || '.';
+
+// ===== Cooldown System =====
+const COOLDOWN = parseInt(process.env.COOLDOWN, 10) || 3; // detik
+const cooldownMap = {};
+// getCooldown: return sisa detik cooldown user untuk command
+function getCooldown(user, command) {
+  const now = Date.now();
+  if (!cooldownMap[command]) return 0;
+  if (!cooldownMap[command][user]) return 0;
+  const expire = cooldownMap[command][user];
+  const sisa = Math.ceil((expire - now) / 1000);
+  return sisa > 0 ? sisa : 0;
+}
+// setCooldown: set cooldown user untuk command
+function setCooldown(user, command, detik = COOLDOWN) {
+  if (!cooldownMap[command]) cooldownMap[command] = {};
+  cooldownMap[command][user] = Date.now() + detik * 1000;
+}
+// onlyCooldown: return true jika user masih cooldown
+function onlyCooldown(user, command) {
+  return getCooldown(user, command) > 0;
 }
 
 function generateBabuTxt(db) {
@@ -25,21 +50,22 @@ function generateBackupCaption(db, operation = '', jumlah = 0, totalOverride = n
   const waktu = now.toLocaleString('id-ID', { hour12: false });
   let opText = '';
   if (operation) {
-    const opMap = {
-      add: '➕ Penambahan',
-      delete: '➖ Penghapusan',
-      import: '✅ Import',
+  const opMap = {
+      add: '➕ *Penambahan*',
+      delete: '➖ *Penghapusan*',
+      import: '✅ *Import*',
     };
     opText = `\n${opMap[operation] || operation} (${jumlah} data)`;
   }
   const total = totalOverride !== null ? totalOverride : db.countBabu();
-  return `🎲 *List Babu*\n📜 *Total:* ${total}${opText}\n🕛 ${waktu}`;
+  return `📜 *List Babu*\n🎲 *Total:* ${total}${opText}\n🕛 ${waktu}`;
 }
+
 
 async function backupToTelegram(db, operation = '', jumlah = 0) {
   if (!telegramBot) return;
   let txt;
-  if (db.countBabu() === 0) {
+  if (getMaxBabuId(db) === 0) {
     txt = 'DATA KOSONG';
   } else {
     txt = generateBabuTxt(db);
@@ -80,6 +106,38 @@ function onlyAdmin(ctx) {
   return ctx.isAdmin === true || ctx.isOwner === true;
 }
 
+// Helper: urutkan ulang id hanya untuk 5 data dengan id terbesar
+function resequenceLastFive(db) {
+  let lastFive = db.db.prepare('SELECT rowid, id, name FROM babu ORDER BY id DESC, rowid DESC LIMIT 5').all();
+  lastFive = lastFive.sort((a, b) => a.id - b.id); // urut ASC
+  let startId = lastFive[0] ? lastFive[0].id : 1;
+  for (let i = 0; i < lastFive.length; i++) {
+    db.db.prepare('UPDATE babu SET id = ? WHERE rowid = ?').run(startId + i, lastFive[i].rowid);
+  }
+}
+
+// Helper: urutkan ulang id seluruh data dari 1 sampai jumlah data, urutan nama tetap
+function resequenceAllId(db) {
+  let all = db.db.prepare('SELECT rowid, name FROM babu ORDER BY rowid ASC').all();
+  let id = 1;
+  for (const b of all) {
+    db.db.prepare('UPDATE babu SET id = ? WHERE rowid = ?').run(id, b.rowid);
+    id++;
+  }
+}
+
+// Helper untuk kirim list babu dengan format .listbabu
+async function sendBabuList(sock, from, db, msg) {
+  const list = db.db.prepare('SELECT * FROM babu ORDER BY id ASC').all();
+  const total = getMaxBabuId(db);
+  let text = `*╭─── ⏺️ List Babu Genz*\n*╰─── 🎲 Total:* ${total}\n`;
+  list.forEach((b) => {
+      text += `*│・${b.id}.${b.name}*\n`;
+  });
+   text += '*╰───────*\n';
+  await sock.sendMessage(from, { text }, { quoted: msg });
+}
+
 module.exports = [
   {
     name: 'addbabu',
@@ -90,7 +148,7 @@ module.exports = [
       const from = msg.key.remoteJid;
       const name = args.join(' ').trim();
       if (!name) {
-        await sock.sendMessage(from, { text: 'Format: .addbabu [nama komunitas]' }, { quoted: msg });
+        await sock.sendMessage(from, { text: `Format: ${prefix}addbabu [nama komunitas]` }, { quoted: msg });
         return;
       }
       // Ambil id terbesar di database
@@ -102,51 +160,33 @@ module.exports = [
       const newRownum = lastRownum + 1;
       db.addBabuWithIdRownum(newId, name, newRownum);
       await backupToTelegram(db, 'add', 1);
-      const total = getMaxBabuId(db);
-      // Ambil data urut rownum ASC agar sama persis dengan file
-      const newList = db.db.prepare('SELECT * FROM babu ORDER BY rownum ASC').all();
-      let text = `List Babu\nTotal: ${total}\n`;
-      newList.forEach((b) => {
-        text += `${b.id}.${b.name}\n`;
-      });
-      await sock.sendMessage(from, { text }, { quoted: msg });
+      await sendBabuList(sock, from, db, msg);
     }
   },
   {
     name: 'deletebabu',
     description: 'Hapus komunitas dari daftar babu (berdasarkan nama, case-insensitive, harus spesifik)',
-    role: ['owner', 'admin', 'akses'],
+    role: ['owner'],
     execute: async (ctx) => {
       const { sock, msg, db, args } = ctx;
       const from = msg.key.remoteJid;
       const name = args.join(' ').trim();
       if (!name) {
-        await sock.sendMessage(from, { text: 'Format: .deletebabu [nama komunitas] (harus spesifik, case-insensitive)' }, { quoted: msg });
+        await sock.sendMessage(from, { text: `Format: ${prefix}deletebabu [nama komunitas] (harus spesifik, case-insensitive)` }, { quoted: msg });
         return;
       }
-      // Hapus entry dengan nama persis (case-insensitive)
-      const del = db.db.prepare('DELETE FROM babu WHERE LOWER(name) = ?').run(name.toLowerCase());
+      const del = db.db.prepare('DELETE FROM babu WHERE rowid = (SELECT rowid FROM babu WHERE LOWER(name) = ? LIMIT 1)').run(name.toLowerCase());
       if (del.changes === 0) {
         await sock.sendMessage(from, { text: 'Nama komunitas tidak ditemukan di database.' }, { quoted: msg });
         return;
       }
-      // SELALU lakukan re-sequencing id dan rownum dari 1,2,3,...
-      const all = db.db.prepare('SELECT name FROM babu ORDER BY rownum ASC').all();
-      db.db.prepare('DELETE FROM babu').run();
-      let id = 1, rownum = 1;
-      for (const b of all) {
-        db.addBabuWithIdRownum(id, b.name, rownum);
-        id++;
-        rownum++;
-      }
       await backupToTelegram(db, 'delete', 1);
-      const total = getMaxBabuId(db);
-      const newList = db.db.prepare('SELECT * FROM babu ORDER BY rownum ASC').all();
-      let text = `List Babu\nTotal: ${total}\n`;
-      newList.forEach((b) => {
-        text += `${b.id}.${b.name}\n`;
-      });
-      await sock.sendMessage(from, { text }, { quoted: msg });
+      if (global.isCleanMode) {
+        resequenceAllId(db);
+      } else {
+        resequenceLastFive(db);
+      }
+      await sendBabuList(sock, from, db, msg);
     }
   },
   {
@@ -156,16 +196,17 @@ module.exports = [
     execute: async (ctx) => {
       const { sock, msg, db } = ctx;
       const from = msg.key.remoteJid;
-      const list = db.db.prepare('SELECT * FROM babu ORDER BY rownum ASC').all();
+      const list = db.db.prepare('SELECT * FROM babu ORDER BY id ASC').all();
       const total = getMaxBabuId(db);
       if (!list.length) {
         await sock.sendMessage(from, { text: 'Belum ada data babu.' }, { quoted: msg });
         return;
       }
-      let text = `List Babu\nTotal: ${total}\n`;
+      let text = `*╭─── ⏺️ List Babu Genz*\n*╰─── 🎲 Total:* ${total}\n`;
       list.forEach((b) => {
-        text += `${b.id}.${b.name}\n`;
+          text += `*│・${b.id}.${b.name}*\n`;
       });
+      text += '*╰───────*\n';
       await sock.sendMessage(from, { text }, { quoted: msg });
     }
   },
@@ -178,7 +219,7 @@ module.exports = [
       const from = msg.key.remoteJid;
       const keyword = args.join(' ').trim();
       if (!keyword) {
-        await sock.sendMessage(from, { text: 'Format: .searchbabu [kata_kunci]' }, { quoted: msg });
+        await sock.sendMessage(from, { text: `Format: ${prefix}searchbabu [kata_kunci]` }, { quoted: msg });
         return;
       }
       const list = db.listBabu(10000, 0);
@@ -188,10 +229,11 @@ module.exports = [
         await sock.sendMessage(from, { text: 'Komunitas tidak ditemukan.' }, { quoted: msg });
         return;
       }
-      let text = 'Hasil:\n';
+      let text = `*╭─── 🔎 Hasil dari ${keyword}:*\n`;
       result.forEach((r, i) => {
-        text += `${i + 1}. ${r.item.name}\n`;
+        text += `*│・${i + 1}. ${r.item.name}*\n`;
       });
+      text += '*╰───────*\n';
       await sock.sendMessage(from, { text }, { quoted: msg });
     }
   },
@@ -204,7 +246,7 @@ module.exports = [
       const from = msg.key.remoteJid;
       const phone = args[0]?.replace(/[^0-9]/g, '');
       if (!phone) {
-        await sock.sendMessage(from, { text: 'Format: .addakses [nomor whatsapp]' }, { quoted: msg });
+        await sock.sendMessage(from, { text: `Format: ${prefix}addakses [nomor whatsapp]` }, { quoted: msg });
         return;
       }
       if (db.isAkses(phone)) {
@@ -251,7 +293,7 @@ module.exports = [
       }
       const phone = args[0]?.replace(/[^0-9]/g, '');
       if (!phone) {
-        await sock.sendMessage(from, { text: 'Format: .deleteakses [nomor whatsapp]' }, { quoted: msg });
+        await sock.sendMessage(from, { text: `Format: ${prefix}deleteakses [nomor whatsapp]` }, { quoted: msg });
         return;
       }
       const exists = db.isAkses(phone);
@@ -270,7 +312,7 @@ module.exports = [
     execute: async (ctx) => {
       const { sock, msg } = ctx;
       const from = msg.key.remoteJid;
-      await sock.sendMessage(from, { text: 'Silakan gunakan .addtxt-risk atau .addtxt-clean sesuai kebutuhan.' }, { quoted: msg });
+      await sock.sendMessage(from, { text: `Silakan gunakan ${prefix}addtxt-risk atau ${prefix}addtxt-clean sesuai kebutuhan.` }, { quoted: msg });
     }
   },
   {
@@ -281,29 +323,47 @@ module.exports = [
       const { sock, msg } = ctx;
       const from = msg.key.remoteJid;
       const allCmds = module.exports;
-      const ownerCmds = allCmds.filter(c => c.role.includes('owner'));
-      const adminCmds = allCmds.filter(c => c.role.includes('admin'));
-      const publicCmds = allCmds.filter(c => c.role.includes('public'));
+      // OWNER ONLY: role persis ['owner']
+      const ownerCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.length === 1 && c.role[0] === 'owner');
+      // ADMIN ONLY: role mengandung 'admin'
+      const adminCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.includes('admin'));
+      // AKSES ONLY: role mengandung 'akses' dan TIDAK mengandung 'admin'
+      const aksesCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.includes('akses') && !c.role.includes('admin'));
+      // PUBLIC: role persis ['public']
+      const publicCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.length === 1 && c.role[0] === 'public');
+      // Buat menu
       let text = '';
       if (ownerCmds.length) {
-        text += '=== OWNER ONLY ===\n';
+        text += '╭─── ✧ *OWNER* ✧\n';
         ownerCmds.forEach(c => {
-          text += `.${c.name} - ${c.description}\n`;
+          text += `│・ *${prefix}${c.name}*\n`;
         });
-        text += '\n';
+        text += '╰───୨ৎ────\n';
       }
       if (adminCmds.length) {
-        text += '=== ADMIN/OWNER ===\n';
+        text += '\n╭─── ✧ *ADMIN* ✧\n';
         adminCmds.forEach(c => {
-          text += `.${c.name} - ${c.description}\n`;
+          if (!ownerCmds.includes(c)) {
+            text += `│・ *${prefix}${c.name}*\n`;
+          }
         });
-        text += '\n';
+        text += '╰───୨ৎ────\n';
+      }
+      if (aksesCmds.length) {
+        text += '\n╭─── ✧ *AKSES KHUSUS* ✧\n';
+        aksesCmds.forEach(c => {
+          if (!ownerCmds.includes(c) && !adminCmds.includes(c)) {
+            text += `│・ *${prefix}${c.name}*\n`;
+          }
+        });
+        text += '╰───୨ৎ────\n';
       }
       if (publicCmds.length) {
-        text += '=== PUBLIC ===\n';
+        text += '\n╭─── ✧ *AKSES KHUSUS* ✧\n';
         publicCmds.forEach(c => {
-          text += `.${c.name} - ${c.description}\n`;
+          text += `│・ *${prefix}${c.name}*\n`;
         });
+        text += '╰───୨ৎ────';
       }
       await sock.sendMessage(from, { text }, { quoted: msg });
     }
@@ -330,7 +390,7 @@ module.exports = [
       // Cari documentMessage
       const docMsg = deepFindDocumentMessage(msg.message);
       if (!docMsg) {
-        await sock.sendMessage(from, { text: 'Kirim file .txt sebagai dokumen dengan command .addtxt-risk' }, { quoted: msg });
+        await sock.sendMessage(from, { text: `Kirim file .txt sebagai dokumen dengan command ${prefix}addtxt-risk` }, { quoted: msg });
         return;
       }
       const stream = await downloadContentFromMessage(docMsg, 'document');
@@ -342,7 +402,7 @@ module.exports = [
       let count = 0;
       let rownum = 1;
       for (const line of lines) {
-        const match = line.match(/^\s*(\d+)\.\s*(.+)$/);
+        const match = line.match(/^[ \t]*(\d+)\.\s*(.+)$/);
         if (match) {
           const id = parseInt(match[1]);
           const name = match[2].trim();
@@ -354,14 +414,8 @@ module.exports = [
         }
       }
       await backupToTelegram(db, 'import', count);
-      const total = getMaxBabuId(db);
-      // Ambil data dari database, urutkan berdasarkan rownum ASC
-      const newList = db.db.prepare('SELECT * FROM babu ORDER BY rownum ASC').all();
-      let text = `List Babu\nTotal: ${total}\n`;
-      newList.forEach((b) => {
-        text += `${b.id}.${b.name}\n`;
-      });
-      await sock.sendMessage(from, { text: `Import selesai. Total data: ${count}` }, { quoted: msg });
+      global.isCleanMode = false;
+      await sendBabuList(sock, from, db, msg);
     }
   },
   {
@@ -373,7 +427,7 @@ module.exports = [
       const from = msg.key.remoteJid;
       const docMsg = deepFindDocumentMessage(msg.message);
       if (!docMsg) {
-        await sock.sendMessage(from, { text: 'Kirim file .txt sebagai dokumen dengan command .addtxt-clean' }, { quoted: msg });
+        await sock.sendMessage(from, { text: `Kirim file .txt sebagai dokumen dengan command ${prefix}addtxt-clean` }, { quoted: msg });
         return;
       }
       const stream = await downloadContentFromMessage(docMsg, 'document');
@@ -400,13 +454,8 @@ module.exports = [
         }
       }
       await backupToTelegram(db, 'import', count);
-      const total = getMaxBabuId(db);
-      const newList = db.db.prepare('SELECT * FROM babu ORDER BY rownum ASC').all();
-      let text = `List Babu\nTotal: ${total}\n`;
-      newList.forEach((b) => {
-        text += `${b.id}.${b.name}\n`;
-      });
-      await sock.sendMessage(from, { text: `Import selesai. Total data: ${count}` }, { quoted: msg });
+      global.isCleanMode = true;
+      await sendBabuList(sock, from, db, msg);
     }
   },
   {
@@ -417,11 +466,11 @@ module.exports = [
       const { sock, msg, args } = ctx;
       const text = args.join(' ').trim();
       if (!text) {
-        await sock.sendMessage(msg.key.remoteJid, { text: '? Masukkan teks untuk membuat stiker.' }, { quoted: msg });
+        await sock.sendMessage(msg.key.remoteJid, { text: 'Masukkan teks untuk membuat stiker.' }, { quoted: msg });
         return;
       }
       // Kirim reaksi ??
-      await sock.sendMessage(msg.key.remoteJid, { react: { text: '??', key: msg.key } });
+      await sock.sendMessage(msg.key.remoteJid, { react: { text: '⏺️', key: msg.key } });
       try {
         const axios = require('axios');
         const { Sticker } = require('wa-sticker-formatter');
@@ -435,9 +484,41 @@ module.exports = [
         const stikerBuffer = await sticker.toBuffer();
         await sock.sendMessage(msg.key.remoteJid, { sticker: stikerBuffer }, { quoted: msg });
       } catch (err) {
-        console.error('? Error:', err);
+        console.error('Error:', err);
         await sock.sendMessage(msg.key.remoteJid, { text: 'Terjadi kesalahan saat membuat stiker.' }, { quoted: msg });
       }
     }
+  },
+  {
+    name: 'hidetag',
+    description: 'Kirim pesan mention semua member (khusus admin/owner)',
+    role: ['akses', 'owner'],
+    execute: async (ctx) => {
+      const { sock, msg, args, isGroup } = ctx;
+      const from = msg.key.remoteJid;
+      if (!isGroup) {
+        await sock.sendMessage(from, { text: 'Command ini hanya untuk grup.' }, { quoted: msg });
+        return;
+      }
+      const metadata = await sock.groupMetadata(from);
+      if (!isBotAdmin(sock, from, metadata)) {
+        await sock.sendMessage(from, { text: 'Bot harus menjadi admin' }, { quoted: msg });
+        return;
+      }
+      const participants = metadata.participants || [];
+      const mentions = participants.map(p => p.id);
+      const text = args.length ? args.join(' ') : '';
+      await sock.sendMessage(from, { text, mentions }, { quoted: msg });
+    }
   }
-]; 
+];
+
+// Tambahkan helper cooldown ke semua command
+const cooldownHelpers = { onlyCooldown, getCooldown, setCooldown, COOLDOWN };
+module.exports.forEach(cmd => Object.assign(cmd, cooldownHelpers));
+
+// Export helper cooldown
+module.exports.getCooldown = getCooldown;
+module.exports.setCooldown = setCooldown;
+module.exports.onlyCooldown = onlyCooldown;
+module.exports.COOLDOWN = COOLDOWN; 
