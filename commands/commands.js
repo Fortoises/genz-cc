@@ -758,7 +758,7 @@ module.exports = [
         
         await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
         // Info proses
-        await sock.sendMessage(from, { text: 'Membuat tweet, mohon tunggu...' }, { quoted: msg });
+        await sock.sendMessage(from, { text: '*⭕ Membuat tweet, mohon tunggu...*' }, { quoted: msg });
         // Ambil gambar
         const response = await axios.get(apiUrl, { responseType: 'arraybuffer' });
         const buffer = Buffer.from(response.data, 'binary');
@@ -924,11 +924,11 @@ module.exports = [
       form.append('image', buffer, { filename: 'image.jpg' });
       // Info proses
       await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
-      await sock.sendMessage(from, { text: '* Sedang memproses gambar Ghibli, mohon tunggu..*' }, { quoted: msg });
+      await sock.sendMessage(from, { text: '*⭕ Sedang memproses gambar Ghibli, mohon tunggu..*' }, { quoted: msg });
       try {
         const response = await axios.post(ghibliApi, form, { headers: form.getHeaders(), responseType: 'arraybuffer' });
         const ghibliBuffer = Buffer.from(response.data, 'binary');
-        await sock.sendMessage(from, { image: ghibliBuffer, caption: 'Berhasil diubah ke style Ghibli!' }, { quoted: msg });
+        await sock.sendMessage(from, { image: ghibliBuffer, caption: '*✅ Berhasil diubah ke style Ghibli!*' }, { quoted: msg });
       } catch (err) {
         console.error('Error di .ghibli:', err);
         if (err.response && err.response.status === 500) {
