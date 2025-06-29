@@ -643,7 +643,7 @@ module.exports = [
           `*╰────────────*`;
         await sock.sendMessage(from, { text }, { quoted: msg });
         // Info sedang mengirim gambar
-        await sock.sendMessage(from, { text: `⭕ *Sedang mengirim gambar profile* [*_${name}_*]` }, { quoted: msg });
+        await sock.sendMessage(from, { text: `⭕ *Sedang mengirim gambar profile* [${name}]` }, { quoted: msg });
         // Kirim gambar banner
         const bannerImgUrl = `${bannerUrl}?uid=${id}&region=id`;
         try {
@@ -651,7 +651,7 @@ module.exports = [
         } catch (e) {
           await sock.sendMessage(from, { text: 'Gagal mengambil gambar banner.' }, { quoted: msg });
         }
-        await sock.sendMessage(from, { text: `⭕ *Sedang mengirim gambar outfit* [*_${name}_*]` }, { quoted: msg });
+        await sock.sendMessage(from, { text: `⭕ *Sedang mengirim gambar outfit* [${name}]` }, { quoted: msg });
         // Kirim gambar outfit
         const outfitImgUrl = `${outfitUrl}?uid=${id}&region=id`;
         try {
