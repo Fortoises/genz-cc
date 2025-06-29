@@ -1,5 +1,8 @@
 {
   "BANNER_FF": "",
   "OUTFIT_FF": "",
-  "DATA_AKUN_FF": ""
+  "DATA_AKUN_FF": "",
+  "TWEET_API_URL": "",
+  "HD_API_URL": "",
+  "GHIBLI_API_URL": ""
 } 

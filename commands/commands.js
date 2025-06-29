@@ -5,6 +5,7 @@ require('dotenv').config();
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const { isBotAdmin } = require('../handler/handler');
 const path = require('path');
+const sharp = require('sharp');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -401,7 +402,7 @@ module.exports = [
         text += '╰───୨ৎ────\n';
       }
       if (publicCmds.length) {
-        text += '\n╭─── ✧ *AKSES KHUSUS* ✧\n';
+        text += '\n╭─── ✧ *PUBLIC* ✧\n';
         publicCmds.forEach(c => {
           text += `│・ *${prefix}${c.name}*\n`;
         });
@@ -548,8 +549,13 @@ module.exports = [
     role: ['akses', 'owner'],
     execute: async (ctx) => {
       if (rejectIfNotGroup(ctx)) return;
-      const { sock, msg, args, isGroup } = ctx;
+      const { sock, msg, args, isGroup, userRoles } = ctx;
       const from = msg.key.remoteJid;
+      // Hanya role akses/owner, admin grup tidak boleh
+      if (!userRoles.includes('akses') && !userRoles.includes('owner')) {
+        await sock.sendMessage(from, { text: 'Command ini hanya untuk role akses/owner.' }, { quoted: msg });
+        return;
+      }
       if (!isGroup) {
         await sock.sendMessage(from, { text: 'Command ini hanya untuk grup.' }, { quoted: msg });
         return;
@@ -678,6 +684,9 @@ module.exports = [
       text += `│ API BANNER FF : ${config.BANNER_FF || 'BELUM DI SET'}\n`;
       text += `│ API OUTFIT FF : ${config.OUTFIT_FF || 'BELUM DI SET'}\n`;
       text += `│ API DATA AKUN FF : ${config.DATA_AKUN_FF || 'BELUM DI SET'}\n`;
+      text += `│ API TWITTER : ${config.TWEET_API_URL || 'BELUM DI SET'}\n`;
+      text += `│ HD IMAGE : ${config.HD_API_URL || 'BELUM DI SET'}\n`;
+      text += `│ GHIBLI : ${config.GHIBLI_API_URL || 'BELUM DI SET'}\n`;
       text += '*╰───*';
       await sock.sendMessage(from, { text }, { quoted: msg });
     }
@@ -692,18 +701,242 @@ module.exports = [
       const from = msg.key.remoteJid;
       const key = args[0]?.toUpperCase();
       const url = args[1];
-      if (!key || !url || !['BANNER_FF','OUTFIT_FF','DATA_AKUN_FF'].includes(key)) {
+      if (!key || !url || !['BANNER_FF','OUTFIT_FF','DATA_AKUN_FF','TWEET_API_URL','HD_API_URL','GHIBLI_API_URL'].includes(key)) {
       let text = `Format: ${prefix}setapi [Nama Api] [Url]\n\n`;
       text += `*╭─── Nama Nama Api*\n`;
       text += `*│ [BANNER_FF]*\n`;
       text += `*│ [OUTFIT_FF]*\n`;
       text += `*│ [DATA_AKUN_FF]*\n`;
+      text += `*│ [TWEET_API_URL]*\n`;
+      text += `*│ [HD_API_URL]*\n`;
+      text += `*│ [GHIBLI_API_URL]*\n`;
       text += '*╰───*';
         await sock.sendMessage(from, { text }, { quoted: msg });
         return;
       }
       setApiConfig(key, url);
+      await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
       await sock.sendMessage(from, { text: `API ${key} berhasil di-set ke: ${url}` }, { quoted: msg });
+    }
+  },
+{
+    name: 'tweet',
+    description: 'Buat tweet palsu dengan gambar (public)',
+    role: ['public'],
+    execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
+      try {
+        const { sock, msg, args } = ctx;
+        const from = msg.key.remoteJid;
+        const config = getApiConfig();
+        const tweetApi = config.TWEET_API_URL;
+        if (!tweetApi) {
+          await sock.sendMessage(from, { text: `API tweet belum di-set. Owner harus set dengan ${prefix}setapi TWEET_API_URL [url]` }, { quoted: msg });
+          return;
+        }
+        const tweetText = args.join(' ').trim();
+        if (!tweetText) {
+          await sock.sendMessage(from, { text: `Format: ${prefix}tweet [teks]` }, { quoted: msg });
+          return;
+        }
+        // Nama WhatsApp
+        const name = msg.pushName || 'User';
+        // Username: nama + 3 angka acak
+        const randomNum = Math.floor(100 + Math.random() * 900);
+        const username = name.replace(/\s+/g, '') + randomNum;
+        // Retweets, quotes, likes acak
+        const retweets = Math.floor(100 + Math.random() * 9000);
+        const quotes = Math.floor(100 + Math.random() * 9000);
+        const likes = Math.floor(100 + Math.random() * 9000);
+        // Profile image (null)
+        const profile = '';
+        // Request ke API
+        const axios = require('axios');
+        const apiUrl = `${tweetApi}?profile=${encodeURIComponent(profile)}&name=${encodeURIComponent(name)}&username=${encodeURIComponent(username)}&tweet=${encodeURIComponent(tweetText)}&image=null&theme=dark&retweets=${retweets}&quotes=${quotes}&likes=${likes}&client=Twitter%20for%20iPhone`;
+        const { Sticker } = require('wa-sticker-formatter');
+        const sharp = require('sharp');
+        
+        await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
+        // Info proses
+        await sock.sendMessage(from, { text: 'Membuat tweet, mohon tunggu...' }, { quoted: msg });
+        // Ambil gambar
+        const response = await axios.get(apiUrl, { responseType: 'arraybuffer' });
+        const buffer = Buffer.from(response.data, 'binary');
+        // Resize ke 512x512, background transparan, fit: 'contain' (gambar selalu utuh)
+        const resizedBuffer = await sharp(buffer)
+          .resize(512, 512, {
+            fit: 'contain',
+            background: { r: 0, g: 0, b: 0, alpha: 0 }
+          })
+          .toBuffer();
+        // Buat sticker dengan metadata
+        const sticker = new Sticker(resizedBuffer, {
+          pack: 'Genz',
+          author: 'GenzBot',
+          type: 'image',
+        });
+        const stikerBuffer = await sticker.toBuffer();
+        // Kirim sebagai sticker
+        await sock.sendMessage(from, { sticker: stikerBuffer }, { quoted: msg });
+      } catch (err) {
+        console.error('Error di .tweet:', err);
+        if (err.response && err.response.status === 500) {
+          await ctx.sock.sendMessage(ctx.msg.key.remoteJid, { text: 'Gagal membuat tweet. (Error server, coba lagi nanti)' }, { quoted: ctx.msg });
+        } else {
+          await ctx.sock.sendMessage(ctx.msg.key.remoteJid, { text: 'Gagal membuat tweet. Coba lagi nanti atau pastikan API sudah benar.' }, { quoted: ctx.msg });
+        }
+      }
+    }
+  },
+{
+    name: 'kick',
+    description: 'Keluarkan member dari grup (khusus akses/owner)',
+    role: ['akses', 'owner'],
+    execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
+      const { sock, msg, args, userRoles } = ctx;
+      const from = msg.key.remoteJid;
+      // Hanya role akses/owner
+      if (!userRoles.includes('akses') && !userRoles.includes('owner')) {
+        await sock.sendMessage(from, { text: 'Command ini hanya untuk role akses/owner.' }, { quoted: msg });
+        return;
+      }
+      // Bot harus admin
+      const metadata = await sock.groupMetadata(from);
+      const botNumber = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+      const botAdmin = metadata.participants.find(p => p.id === botNumber && p.admin);
+      if (!botAdmin) {
+        await sock.sendMessage(from, { text: 'Bot harus menjadi admin untuk mengeluarkan member.' }, { quoted: msg });
+        return;
+      }
+      // Ambil target: dari mention atau reply
+      let target;
+      if (msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.length) {
+        target = msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
+      } else if (msg.message?.extendedTextMessage?.contextInfo?.participant) {
+        target = msg.message.extendedTextMessage.contextInfo.participant;
+      } else {
+        await sock.sendMessage(from, { text: 'Tag atau reply user yang ingin dikeluarkan.' }, { quoted: msg });
+        return;
+      }
+      // Tidak bisa kick owner grup
+      const ownerJid = metadata.owner || (metadata.participants.find(p => p.admin === 'superadmin')?.id);
+      if (target === ownerJid) {
+        await sock.sendMessage(from, { text: 'Tidak bisa mengeluarkan pemilik grup!' }, { quoted: msg });
+        return;
+      }
+      // Tidak bisa kick diri sendiri
+      if (target === msg.key.participant || target === msg.key.remoteJid) {
+        await sock.sendMessage(from, { text: 'Tidak bisa mengeluarkan diri sendiri.' }, { quoted: msg });
+        return;
+      }
+      if (target === botNumber) {
+        await sock.sendMessage(from, { text: 'Tidak bisa mengeluarkan bot sendiri.' }, { quoted: msg });
+        return;
+      }
+      // Eksekusi kick
+      try {
+        await sock.groupParticipantsUpdate(from, [target], 'remove');
+        await sock.sendMessage(from, { text: 'Sukses mengeluarkan member.' }, { quoted: msg });
+      } catch (e) {
+        await sock.sendMessage(from, { text: 'Gagal mengeluarkan member. Pastikan bot admin dan user masih di grup.' }, { quoted: msg });
+      }
+    }
+  },
+{
+    name: 'hd',
+    description: 'Ubah gambar jadi HD (public, via API)',
+    role: ['public'],
+    execute: async (ctx) => {
+      const { sock, msg, args } = ctx;
+      const from = msg.key.remoteJid;
+      const config = getApiConfig();
+      const hdApi = config.HD_API_URL;
+      if (!hdApi) {
+        await sock.sendMessage(from, { text: `API HD belum di-set. Owner harus set dengan ${prefix}setapi HD_API_URL [url]` }, { quoted: msg });
+        return;
+      }
+      // Cek reply gambar
+      const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+      const imgMsg = quoted?.imageMessage || quoted?.documentMessage;
+      if (!imgMsg) {
+        await sock.sendMessage(from, { text: 'Reply gambar yang ingin di-HD-kan.' }, { quoted: msg });
+        return;
+      }
+      // Download gambar
+      const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+      const stream = await downloadContentFromMessage(imgMsg, 'image');
+      let buffer = Buffer.from([]);
+      for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+      // Upload ke API (pakai endpoint ?image=URL, jadi upload ke img hosting dulu)
+      // Untuk simplicity, upload ke imgur/anonfiles/telegra.ph, atau jika API support upload langsung, pakai form-data
+      // Di sini diasumsikan API support upload via form-data
+      const axios = require('axios');
+      const FormData = require('form-data');
+      const form = new FormData();
+      form.append('image', buffer, { filename: 'image.jpg' });
+      // Info proses
+      await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
+      await sock.sendMessage(from, { text: '*⭕ Sedang memproses gambar HD, mohon tunggu..*' }, { quoted: msg });
+      try {
+        const response = await axios.post(hdApi, form, { headers: form.getHeaders(), responseType: 'arraybuffer' });
+        const hdBuffer = Buffer.from(response.data, 'binary');
+        await sock.sendMessage(from, { image: hdBuffer, caption: '*✅ HD Berhasil*' }, { quoted: msg });
+      } catch (err) {
+        console.error('Error di .hd:', err);
+        if (err.response && err.response.status === 500) {
+          await sock.sendMessage(from, { text: 'Gagal memproses gambar HD. (Error server, coba lagi nanti)' }, { quoted: msg });
+        } else {
+          await sock.sendMessage(from, { text: 'Gagal memproses gambar HD. Pastikan API benar dan gambar valid.' }, { quoted: msg });
+        }
+      }
+    }
+  },
+{
+    name: 'ghibli',
+    description: 'Ubah gambar jadi style Ghibli (public, via API)',
+    role: ['public'],
+    execute: async (ctx) => {
+      const { sock, msg } = ctx;
+      const from = msg.key.remoteJid;
+      const config = getApiConfig();
+      const ghibliApi = config.GHIBLI_API_URL;
+      if (!ghibliApi) {
+        await sock.sendMessage(from, { text: `API Ghibli belum di-set. Owner harus set dengan ${prefix}setapi GHIBLI_API_URL [url]` }, { quoted: msg });
+        return;
+      }
+      // Cek reply gambar
+      const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+      const imgMsg = quoted?.imageMessage || quoted?.documentMessage;
+      if (!imgMsg) {
+        await sock.sendMessage(from, { text: 'Reply gambar yang ingin diubah ke style Ghibli.' }, { quoted: msg });
+        return;
+      }
+      // Download gambar
+      const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+      const stream = await downloadContentFromMessage(imgMsg, 'image');
+      let buffer = Buffer.from([]);
+      for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+      // Upload ke API (diasumsikan support upload via form-data)
+      const axios = require('axios');
+      const FormData = require('form-data');
+      const form = new FormData();
+      form.append('image', buffer, { filename: 'image.jpg' });
+      // Info proses
+      await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
+      await sock.sendMessage(from, { text: '* Sedang memproses gambar Ghibli, mohon tunggu..*' }, { quoted: msg });
+      try {
+        const response = await axios.post(ghibliApi, form, { headers: form.getHeaders(), responseType: 'arraybuffer' });
+        const ghibliBuffer = Buffer.from(response.data, 'binary');
+        await sock.sendMessage(from, { image: ghibliBuffer, caption: 'Berhasil diubah ke style Ghibli!' }, { quoted: msg });
+      } catch (err) {
+        console.error('Error di .ghibli:', err);
+        if (err.response && err.response.status === 500) {
+          await sock.sendMessage(from, { text: 'Gagal memproses gambar Ghibli. (Error server, coba lagi nanti)' }, { quoted: msg });
+        } else {
+          await sock.sendMessage(from, { text: 'Gagal memproses gambar Ghibli. Pastikan API benar dan gambar valid.' }, { quoted: msg });
+        }
+      }
     }
   }
 ];

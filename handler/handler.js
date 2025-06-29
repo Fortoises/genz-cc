@@ -25,11 +25,13 @@ async function onMessage(sock, msg, db, commands, prefix, isOwner) {
       try {
         const metadata = await sock.groupMetadata(from);
         const groupAdmins = getGroupAdmins(metadata.participants);
-        if (groupAdmins.includes(sender)) {
-          userRoles = ['admin', 'akses', 'public'];
-          isAdmin = true;
-        } else if (db.isAkses(senderId)) {
+        if (db.isAkses(senderId)) {
+          // Jika user ada di whitelist akses, role akses
           userRoles = ['akses', 'public'];
+        } else if (groupAdmins.includes(sender)) {
+          // Jika admin grup tapi bukan akses, hanya admin
+          userRoles = ['admin', 'public'];
+          isAdmin = true;
         }
       } catch (err) {
         // Jika gagal ambil metadata grup, fallback ke public
