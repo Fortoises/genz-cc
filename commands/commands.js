@@ -4,6 +4,7 @@ const TelegramBot = require('node-telegram-bot-api');
 require('dotenv').config();
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const { isBotAdmin } = require('../handler/handler');
+const path = require('path');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -11,6 +12,8 @@ let telegramBot = null;
 if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
   telegramBot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
 }
+
+const prefix = process.env.PREFIX || '.';
 
 // ===== Cooldown System =====
 const COOLDOWN = parseInt(process.env.COOLDOWN, 10) || 3; // detik
@@ -33,8 +36,6 @@ function setCooldown(user, command, detik = COOLDOWN) {
 function onlyCooldown(user, command) {
   return getCooldown(user, command) > 0;
 }
-
-const prefix = process.env.PREFIX || '.';
 
 function generateBabuTxt(db) {
   const list = db.db.prepare('SELECT * FROM babu ORDER BY rownum ASC').all();
@@ -137,12 +138,38 @@ async function sendBabuList(sock, from, db, msg) {
   await sock.sendMessage(from, { text }, { quoted: msg });
 }
 
+// Helper: Cek jika bukan grup, balas pesan dan return true
+function rejectIfNotGroup(ctx) {
+  const { sock, msg } = ctx;
+  const from = msg.key.remoteJid;
+  if (!ctx.isGroup) {
+    sock.sendMessage(from, { text: 'Maaf, bot hanya bisa digunakan di grup.' }, { quoted: msg });
+    return true;
+  }
+  return false;
+}
+
+const apiConfigPath = path.join(__dirname, '../database/api_config.json');
+function getApiConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(apiConfigPath, 'utf-8'));
+  } catch {
+    return { BANNER_FF: '', OUTFIT_FF: '', DATA_AKUN_FF: '' };
+  }
+}
+function setApiConfig(key, value) {
+  const config = getApiConfig();
+  config[key] = value;
+  fs.writeFileSync(apiConfigPath, JSON.stringify(config, null, 2));
+}
+
 module.exports = [
-{
+  {
     name: 'addbabu',
     description: 'Tambah komunitas ke daftar babu',
     role: ['owner', 'admin', 'akses'],
     execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
       const { sock, msg, db, args } = ctx;
       const from = msg.key.remoteJid;
       const name = args.join(' ').trim();
@@ -165,8 +192,9 @@ module.exports = [
   {
     name: 'deletebabu',
     description: 'Hapus komunitas dari daftar babu (berdasarkan nama, case-insensitive, harus spesifik)',
-    role: ['owner'],
+    role: ['owner', 'admin', 'akses'],
     execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
       const { sock, msg, db, args } = ctx;
       const from = msg.key.remoteJid;
       const name = args.join(' ').trim();
@@ -193,20 +221,28 @@ module.exports = [
     description: 'Tampilkan seluruh daftar babu',
     role: ['public'],
     execute: async (ctx) => {
-      const { sock, msg, db } = ctx;
-      const from = msg.key.remoteJid;
-      const list = db.db.prepare('SELECT * FROM babu ORDER BY id ASC').all();
-      const total = getMaxBabuId(db);
-      if (!list.length) {
-        await sock.sendMessage(from, { text: 'Belum ada data babu.' }, { quoted: msg });
-        return;
-      }
-      let text = `*╭─── ⏺️ List Babu Genz*\n*╰─── 🎲 Total:* ${total}\n`;
-      list.forEach((b) => {
+      if (rejectIfNotGroup(ctx)) return;
+      try {
+        const { sock, msg, db } = ctx;
+        const from = msg.key.remoteJid;
+        const list = db.db.prepare('SELECT * FROM babu ORDER BY id ASC').all();
+        const total = getMaxBabuId(db);
+        if (!list.length) {
+          await sock.sendMessage(from, { text: 'Belum ada data babu.' }, { quoted: msg });
+          return;
+        }
+        let text = `*╭─── ⏺️ List Babu Genz*\n*╰─── 🎲 Total:* ${total}\n`;
+        list.forEach((b) => {
           text += `*│・${b.id}.${b.name}*\n`;
-      });
-      text += '*╰───────*\n';
-      await sock.sendMessage(from, { text }, { quoted: msg });
+        });
+        text += '*╰───────*\n';
+        await sock.sendMessage(from, { text }, { quoted: msg });
+      } catch (err) {
+        console.error('Error di .listbabu:', err);
+        try {
+          await ctx.sock.sendMessage(ctx.msg.key.remoteJid, { text: 'Terjadi error di command listbabu.' }, { quoted: ctx.msg });
+        } catch {}
+      }
     }
   },
   {
@@ -214,6 +250,7 @@ module.exports = [
     description: 'Cari komunitas dengan fuzzy search',
     role: ['public'],
     execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
       const { sock, msg, db, args } = ctx;
       const from = msg.key.remoteJid;
       const keyword = args.join(' ').trim();
@@ -241,6 +278,7 @@ module.exports = [
     description: 'Tambah nomor ke whitelist akses',
     role: ['owner'],
     execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
       const { sock, msg, db, args, user } = ctx;
       const from = msg.key.remoteJid;
       const phone = args[0]?.replace(/[^0-9]/g, '');
@@ -261,6 +299,7 @@ module.exports = [
     description: 'Tampilkan semua nomor akses dan role (khusus owner)',
     role: ['owner'],
     execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
       const { sock, msg, db, isOwner } = ctx;
       const from = msg.key.remoteJid;
       if (!isOwner) {
@@ -284,6 +323,7 @@ module.exports = [
     description: 'Hapus nomor dari akses (khusus owner)',
     role: ['owner'],
     execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
       const { sock, msg, db, args, isOwner } = ctx;
       const from = msg.key.remoteJid;
       if (!isOwner) {
@@ -309,6 +349,7 @@ module.exports = [
     description: 'Petunjuk penggunaan import .txt',
     role: ['owner'],
     execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
       const { sock, msg } = ctx;
       const from = msg.key.remoteJid;
       await sock.sendMessage(from, { text: `Silakan gunakan ${prefix}addtxt-risk atau ${prefix}addtxt-clean sesuai kebutuhan.` }, { quoted: msg });
@@ -319,27 +360,29 @@ module.exports = [
     description: 'Tampilkan menu bot',
     role: ['public'],
     execute: async (ctx) => {
-      const { sock, msg } = ctx;
-      const from = msg.key.remoteJid;
-      const allCmds = module.exports;
-      // OWNER ONLY: role persis ['owner']
-      const ownerCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.length === 1 && c.role[0] === 'owner');
-      // ADMIN ONLY: role mengandung 'admin'
-      const adminCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.includes('admin'));
-      // AKSES ONLY: role mengandung 'akses' dan TIDAK mengandung 'admin'
-      const aksesCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.includes('akses') && !c.role.includes('admin'));
-      // PUBLIC: role persis ['public']
-      const publicCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.length === 1 && c.role[0] === 'public');
-      // Buat menu
-      let text = '';
-      if (ownerCmds.length) {
+      if (rejectIfNotGroup(ctx)) return;
+      try {
+        const { sock, msg } = ctx;
+        const from = msg.key.remoteJid;
+        const allCmds = module.exports;
+        // OWNER ONLY: role persis ['owner']
+        const ownerCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.length === 1 && c.role[0] === 'owner');
+        // ADMIN ONLY: role mengandung 'admin'
+        const adminCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.includes('admin'));
+        // AKSES ONLY: role mengandung 'akses' dan TIDAK mengandung 'admin'
+        const aksesCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.includes('akses') && !c.role.includes('admin'));
+        // PUBLIC: role persis ['public']
+        const publicCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.length === 1 && c.role[0] === 'public');
+        // Buat menu
+        let text = '';
+        if (ownerCmds.length) {
         text += '╭─── ✧ *OWNER* ✧\n';
         ownerCmds.forEach(c => {
           text += `│・ *${prefix}${c.name}*\n`;
         });
         text += '╰───୨ৎ────\n';
       }
-      if (adminCmds.length) {
+        if (adminCmds.length) {
         text += '\n╭─── ✧ *ADMIN* ✧\n';
         adminCmds.forEach(c => {
           if (!ownerCmds.includes(c)) {
@@ -348,7 +391,7 @@ module.exports = [
         });
         text += '╰───୨ৎ────\n';
       }
-      if (aksesCmds.length) {
+        if (aksesCmds.length) {
         text += '\n╭─── ✧ *AKSES KHUSUS* ✧\n';
         aksesCmds.forEach(c => {
           if (!ownerCmds.includes(c) && !adminCmds.includes(c)) {
@@ -364,7 +407,13 @@ module.exports = [
         });
         text += '╰───୨ৎ────';
       }
-      await sock.sendMessage(from, { text }, { quoted: msg });
+        await sock.sendMessage(from, { text }, { quoted: msg });
+      } catch (err) {
+        console.error('Error di .menu:', err);
+        try {
+          await ctx.sock.sendMessage(ctx.msg.key.remoteJid, { text: 'Terjadi error di command menu.' }, { quoted: ctx.msg });
+        } catch {}
+      }
     }
   },
   {
@@ -372,6 +421,7 @@ module.exports = [
     description: 'Hapus semua data babu',
     role: ['owner'],
     execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
       const { sock, msg, db } = ctx;
       const from = msg.key.remoteJid;
       db.db.prepare('DELETE FROM babu').run();
@@ -384,6 +434,7 @@ module.exports = [
     description: 'Import file .txt, urutan dan nomor PERSIS seperti file, tanpa cek duplikat, tanpa urut ulang',
     role: ['owner'],
     execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
       const { sock, msg, db } = ctx;
       const from = msg.key.remoteJid;
       // Cari documentMessage
@@ -422,6 +473,7 @@ module.exports = [
     description: 'Import file .txt, hanya nama unik, id dan urutan otomatis sesuai urutan file',
     role: ['owner'],
     execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
       const { sock, msg, db } = ctx;
       const from = msg.key.remoteJid;
       const docMsg = deepFindDocumentMessage(msg.message);
@@ -462,14 +514,15 @@ module.exports = [
     description: 'Buat stiker brat dari teks',
     role: ['public'],
     execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
       const { sock, msg, args } = ctx;
       const text = args.join(' ').trim();
       if (!text) {
         await sock.sendMessage(msg.key.remoteJid, { text: 'Masukkan teks untuk membuat stiker.' }, { quoted: msg });
         return;
       }
-      // Kirim reaksi ??
-      await sock.sendMessage(msg.key.remoteJid, { react: { text: '⏺️', key: msg.key } });
+      // Kirim reaksi
+      await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
       try {
         const axios = require('axios');
         const { Sticker } = require('wa-sticker-formatter');
@@ -483,16 +536,18 @@ module.exports = [
         const stikerBuffer = await sticker.toBuffer();
         await sock.sendMessage(msg.key.remoteJid, { sticker: stikerBuffer }, { quoted: msg });
       } catch (err) {
-        console.error('Error:', err);
+        console.error('? Error:', err);
         await sock.sendMessage(msg.key.remoteJid, { text: 'Terjadi kesalahan saat membuat stiker.' }, { quoted: msg });
       }
     }
   },
   {
     name: 'hidetag',
+    aliases: ['ht'],
     description: 'Kirim pesan mention semua member (khusus admin/owner)',
     role: ['akses', 'owner'],
     execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
       const { sock, msg, args, isGroup } = ctx;
       const from = msg.key.remoteJid;
       if (!isGroup) {
@@ -515,6 +570,8 @@ module.exports = [
     description: 'Dapatkan link source code bot ini di GitHub',
     role: ['public'],
     execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
+      try {
       const { sock, msg } = ctx;
       const from = msg.key.remoteJid;
       const githubUrl = 'https://github.com/Fortoises/genz-cc'; // Ganti dengan link repo kamu jika perlu
@@ -524,6 +581,129 @@ module.exports = [
         `${githubUrl}\n\n` +
         `Jangan lupa kasih 🌟 ya!`;
       await sock.sendMessage(from, { text, linkPreview: true }, { quoted: msg });
+      } catch (err) {
+        console.error('Error di .sourcecode:', err);
+        try {
+          await ctx.sock.sendMessage(ctx.msg.key.remoteJid, { text: 'Terjadi error di command sourcecode.' }, { quoted: ctx.msg });
+        } catch {}
+      }
+    }
+  },
+  {
+    name: 'ff',
+    description: 'Cari info akun Free Fire dengan .ff [id]',
+    role: ['public'],
+    execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
+      try {
+        const { sock, msg, args } = ctx;
+        const from = msg.key.remoteJid;
+        const id = args[0];
+        if (!id || !/^[0-9]+$/.test(id)) {
+          await sock.sendMessage(from, { text: `Format: ${prefix}ff [id] (contoh: ${prefix}ff 1815404630)` }, { quoted: msg });
+          return;
+        }
+        const config = getApiConfig();
+        const dataUrl = config.DATA_AKUN_FF;
+        const bannerUrl = config.BANNER_FF;
+        const outfitUrl = config.OUTFIT_FF;
+        if (!dataUrl || !bannerUrl || !outfitUrl) {
+          await sock.sendMessage(from, { text: `API FF belum di-set. Owner harus set dengan ${prefix}setapi` }, { quoted: msg });
+          return;
+        }
+        const axios = require('axios');
+        const url = `${dataUrl}?uid=${id}&region=id`;
+        const res = await axios.get(url);
+        const data = res.data && res.data.player_info && res.data.player_info.basicInfo;
+        if (!data) {
+          await sock.sendMessage(from, { text: 'Akun tidak ditemukan atau API error.' }, { quoted: msg });
+          return;
+        }
+        const primeLevel = data.primeLevel?.level ?? '-';
+        const name = data.nickname ?? '-';
+        const uid = data.accountId ?? '-';
+        const level = data.level ?? '-';
+        const region = data.region ?? '-';
+        const likes = data.liked ?? '-';
+        const creditScore = res.data.player_info.creditScoreInfo?.creditScore ?? '-';
+        const bio = res.data.player_info.socialInfo?.signature ? res.data.player_info.socialInfo.signature : '-';
+        const lastLogin = data.lastLoginAt ? new Date(parseInt(data.lastLoginAt) * 1000).toLocaleString('id-ID', { hour12: false }) : '-';
+        const createdAt = data.createAt ? new Date(parseInt(data.createAt) * 1000).toLocaleString('id-ID', { hour12: false }) : '-';
+        const text = `*╭─── Free Fire Info*\n` +
+          `*│ Prime Level:* ${primeLevel}\n` +
+          `*│ Name:* ${name}\n` +
+          `*│ UID:* ${uid}\n` +
+          `*│ Level:* ${level}\n` +
+          `*│ Region:* ${region}\n` +
+          `*│ Likes:* ${likes}\n` +
+          `*│ Credit Score:* ${creditScore}\n` +
+          `*│ Last Login:* ${lastLogin}\n` +
+          `*│ Created At:* ${createdAt}\n` +
+          `*│ Bio:* ${bio}\n` +
+          `*╰────────────*`;
+        await sock.sendMessage(from, { text }, { quoted: msg });
+        // Info sedang mengirim gambar
+        await sock.sendMessage(from, { text: `⭕ *Sedang mengirim gambar profile* [*_${name}_*]` }, { quoted: msg });
+        // Kirim gambar banner
+        const bannerImgUrl = `${bannerUrl}?uid=${id}&region=id`;
+        try {
+          await sock.sendMessage(from, { image: { url: bannerImgUrl }, caption: `📌 *Profile*` }, { quoted: msg });
+        } catch (e) {
+          await sock.sendMessage(from, { text: 'Gagal mengambil gambar banner.' }, { quoted: msg });
+        }
+        await sock.sendMessage(from, { text: `⭕ *Sedang mengirim gambar outfit* [*_${name}_*]` }, { quoted: msg });
+        // Kirim gambar outfit
+        const outfitImgUrl = `${outfitUrl}?uid=${id}&region=id`;
+        try {
+          await sock.sendMessage(from, { image: { url: outfitImgUrl }, caption: `👤 *Outfit*` }, { quoted: msg });
+        } catch (e) {
+          await sock.sendMessage(from, { text: 'Gagal mengambil gambar outfit.' }, { quoted: msg });
+        }
+      } catch (err) {
+        console.error('Error di .ff:', err);
+        await ctx.sock.sendMessage(ctx.msg.key.remoteJid, { text: 'Gagal mengambil data akun FF. Coba lagi nanti atau pastikan ID benar.' }, { quoted: ctx.msg });
+      }
+    }
+  },
+  {
+    name: 'listapi',
+    description: 'Lihat semua URL API FF (owner only)',
+    role: ['owner'],
+    execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
+      const { sock, msg } = ctx;
+      const from = msg.key.remoteJid;
+      const config = getApiConfig();
+      let text = '╭─── *List API FF:*\n';
+      text += `│ API BANNER FF : ${config.BANNER_FF || 'BELUM DI SET'}\n`;
+      text += `│ API OUTFIT FF : ${config.OUTFIT_FF || 'BELUM DI SET'}\n`;
+      text += `│ API DATA AKUN FF : ${config.DATA_AKUN_FF || 'BELUM DI SET'}\n`;
+      text += '*╰───*';
+      await sock.sendMessage(from, { text }, { quoted: msg });
+    }
+  },
+  {
+    name: 'setapi',
+    description: 'Set URL API FF (owner only)',
+    role: ['owner'],
+    execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
+      const { sock, msg, args } = ctx;
+      const from = msg.key.remoteJid;
+      const key = args[0]?.toUpperCase();
+      const url = args[1];
+      if (!key || !url || !['BANNER_FF','OUTFIT_FF','DATA_AKUN_FF'].includes(key)) {
+      let text = `Format: ${prefix}setapi [Nama Api] [Url]\n\n`;
+      text += `*╭─── Nama Nama Api*\n`;
+      text += `*│ [BANNER_FF]*\n`;
+      text += `*│ [OUTFIT_FF]*\n`;
+      text += `*│ [DATA_AKUN_FF]*\n`;
+      text += '*╰───*';
+        await sock.sendMessage(from, { text }, { quoted: msg });
+        return;
+      }
+      setApiConfig(key, url);
+      await sock.sendMessage(from, { text: `API ${key} berhasil di-set ke: ${url}` }, { quoted: msg });
     }
   }
 ];

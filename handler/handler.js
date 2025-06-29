@@ -22,13 +22,19 @@ async function onMessage(sock, msg, db, commands, prefix, isOwner) {
       userRoles = ['owner', 'admin', 'akses', 'public'];
       isAdmin = true;
     } else if (isGroup) {
-      const metadata = await sock.groupMetadata(from);
-      const groupAdmins = getGroupAdmins(metadata.participants);
-      if (groupAdmins.includes(sender)) {
-        userRoles = ['admin', 'akses', 'public'];
-        isAdmin = true;
-      } else if (db.isAkses(senderId)) {
-        userRoles = ['akses', 'public'];
+      try {
+        const metadata = await sock.groupMetadata(from);
+        const groupAdmins = getGroupAdmins(metadata.participants);
+        if (groupAdmins.includes(sender)) {
+          userRoles = ['admin', 'akses', 'public'];
+          isAdmin = true;
+        } else if (db.isAkses(senderId)) {
+          userRoles = ['akses', 'public'];
+        }
+      } catch (err) {
+        // Jika gagal ambil metadata grup, fallback ke public
+        userRoles = ['public'];
+        isAdmin = false;
       }
     } else if (db.isAkses(senderId)) {
       userRoles = ['akses', 'public'];
