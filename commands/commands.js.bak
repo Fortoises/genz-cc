@@ -186,7 +186,7 @@ module.exports = [
         return;
       }
       
-      await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
+
       // Ambil id terbesar di database
       const lastId = db.getMaxBabuId();
       const newId = lastId + 1;
@@ -196,6 +196,7 @@ module.exports = [
       const newRownum = lastRownum + 1;
       db.addBabuWithIdRownum(newId, name, newRownum);
       await backupToTelegram(db, 'add', 1);
+      await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
       await sock.sendMessage(from, { text: `*✅ Berhasil menambah babu [${name}]. Silahkan ${prefix}listbabu untuk mengecek*` }, { quoted: msg });
     }
   },
@@ -213,7 +214,7 @@ module.exports = [
         return;
       }
       
-      await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
+
       const del = db.db.prepare('DELETE FROM babu WHERE rowid = (SELECT rowid FROM babu WHERE LOWER(name) = ? LIMIT 1)').run(name.toLowerCase());
       if (del.changes === 0) {
         await sock.sendMessage(from, { text: 'Nama komunitas tidak ditemukan di database.' }, { quoted: msg });
@@ -225,6 +226,7 @@ module.exports = [
       } else {
         resequenceLastFive(db);
       }
+      await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
       await sock.sendMessage(from, { text: `*🔼 Berhasil menghapus babu [${name}]. Silahkan ${prefix}listbabu untuk mengecek*` }, { quoted: msg });
     }
   },
