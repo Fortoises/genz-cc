@@ -84,9 +84,9 @@ Contoh terdapat pada file env.example
 
 ```bash
 PREFIX=.
-OWNER=6281234567890
-TELEGRAM_BOT_TOKEN=isi_token_telegram_disini
-TELEGRAM_CHAT_ID=isi_chat_id_disini 
+OWNER=628
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
 ```
 - Untuk prefix terserah kalian (opsional)
 
