@@ -1,8 +1,8 @@
 {
-  "BANNER_FF": "",
-  "OUTFIT_FF": "",
-  "DATA_AKUN_FF": "",
-  "TWEET_API_URL": "",
-  "HD_API_URL": "",
-  "GHIBLI_API_URL": ""
+  "BANNER_FF": "https://aditya-banner-v11op.onrender.com/banner-image",
+  "OUTFIT_FF": "https://aditya-outfit-v11op.onrender.com/outfit-image",
+  "DATA_AKUN_FF": "https://aditya-info-v11op.onrender.com/player-info",
+  "TWEET_API_URL": "https://api.siputzx.my.id/api/m/tweet",
+  "HD_API_URL": "https://api.siputzx.my.id/api/iloveimg/upscale",
+  "GHIBLI_API_URL": "https://api.siputzx.my.id/api/image2ghibli"
 } 
