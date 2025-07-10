@@ -6,6 +6,15 @@ const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const { isBotAdmin } = require('../handler/handler');
 const path = require('path');
 const sharp = require('sharp');
+const {
+  addRekap,
+  getRekapByKomunitas,
+  getRekapByMessageId,
+  updateRekapPeserta,
+  deleteRekapByKomunitas,
+  clearExpiredRekap
+} = require('../database/database');
+
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -19,7 +28,7 @@ const prefix = process.env.PREFIX || '.';
 // ===== Cooldown System =====
 const COOLDOWN = parseInt(process.env.COOLDOWN, 10) || 3; // detik
 const cooldownMap = {};
-// getCooldown: return sisa detik cooldown user untuk command
+
 function getCooldown(user, command) {
   const now = Date.now();
   if (!cooldownMap[command]) return 0;
@@ -28,12 +37,12 @@ function getCooldown(user, command) {
   const sisa = Math.ceil((expire - now) / 1000);
   return sisa > 0 ? sisa : 0;
 }
-// setCooldown: set cooldown user untuk command
+
 function setCooldown(user, command, detik = COOLDOWN) {
   if (!cooldownMap[command]) cooldownMap[command] = {};
   cooldownMap[command][user] = Date.now() + detik * 1000;
 }
-// onlyCooldown: return true jika user masih cooldown
+
 function onlyCooldown(user, command) {
   return getCooldown(user, command) > 0;
 }
@@ -75,7 +84,6 @@ async function backupToTelegram(db, operation = '', jumlah = 0) {
   const caption = generateBackupCaption(db, operation, jumlah, total);
   const filePath = './babu-backup.txt';
   fs.writeFileSync(filePath, txt);
-  // Tentukan contentType secara eksplisit
   const contentType = 'text/plain';
   await telegramBot.sendDocument(
     TELEGRAM_CHAT_ID,
@@ -96,35 +104,32 @@ function deepFindDocumentMessage(obj) {
   return null;
 }
 
-// Helper untuk ambil total id terbesar
+
 function getMaxBabuId(db) {
   const row = db.db.prepare('SELECT MAX(id) as maxId FROM babu').get();
   return row && row.maxId ? row.maxId : 0;
 }
 
-// Helper: hanya untuk owner
+
 function onlyOwner(ctx) {
-  // ctx.isOwner harus sudah diisi oleh handler utama
   return ctx.isOwner === true;
 }
 
-// Helper: hanya untuk admin atau owner
 function onlyAdmin(ctx) {
-  // ctx.isAdmin dan ctx.isOwner harus sudah diisi oleh handler utama
   return ctx.isAdmin === true || ctx.isOwner === true;
 }
 
-// Helper: urutkan ulang id hanya untuk 5 data dengan id terbesar
+
 function resequenceLastFive(db) {
   let lastFive = db.db.prepare('SELECT rowid, id, name FROM babu ORDER BY id DESC, rowid DESC LIMIT 5').all();
-  lastFive = lastFive.sort((a, b) => a.id - b.id); // urut ASC
+  lastFive = lastFive.sort((a, b) => a.id - b.id);
   let startId = lastFive[0] ? lastFive[0].id : 1;
   for (let i = 0; i < lastFive.length; i++) {
     db.db.prepare('UPDATE babu SET id = ? WHERE rowid = ?').run(startId + i, lastFive[i].rowid);
   }
 }
 
-// Helper: urutkan ulang id seluruh data dari 1 sampai jumlah data, urutan nama tetap
+
 function resequenceAllId(db) {
   let all = db.db.prepare('SELECT rowid, name FROM babu ORDER BY rowid ASC').all();
   let id = 1;
@@ -134,7 +139,7 @@ function resequenceAllId(db) {
   }
 }
 
-// Helper untuk kirim list babu dengan format .listbabu
+
 async function sendBabuList(sock, from, db, msg) {
   const list = db.db.prepare('SELECT * FROM babu ORDER BY id ASC').all();
   const total = getMaxBabuId(db);
@@ -146,7 +151,7 @@ async function sendBabuList(sock, from, db, msg) {
   await sock.sendMessage(from, { text }, { quoted: msg });
 }
 
-// Helper: Cek jika bukan grup, balas pesan dan return true
+
 function rejectIfNotGroup(ctx) {
   const { sock, msg } = ctx;
   const from = msg.key.remoteJid;
@@ -187,10 +192,9 @@ module.exports = [
       }
       
       await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
-      // Ambil id terbesar di database
+
       const lastId = db.getMaxBabuId();
       const newId = lastId + 1;
-      // Ambil rownum terbesar di database
       const lastRownumRow = db.db.prepare('SELECT MAX(rownum) as maxRownum FROM babu').get();
       const lastRownum = lastRownumRow ? (lastRownumRow.maxRownum || 0) : 0;
       const newRownum = lastRownum + 1;
@@ -225,7 +229,7 @@ module.exports = [
       } else {
         resequenceLastFive(db);
       }
-      await sock.sendMessage(from, { text: `*🔼 Berhasil menghapus babu [${name}]. Silahkan ${prefix}listbabu untuk mengecek*` }, { quoted: msg });
+      await sock.sendMessage(from, { text: `*✅ Berhasil menghapus babu [${name}]. Silahkan ${prefix}listbabu untuk mengecek*` }, { quoted: msg });
     }
   },
   {
@@ -240,7 +244,7 @@ module.exports = [
         const list = db.db.prepare('SELECT * FROM babu ORDER BY id ASC').all();
         const total = getMaxBabuId(db);
         if (!list.length) {
-          await sock.sendMessage(from, { text: 'Belum ada data babu.' }, { quoted: msg });
+          await sock.sendMessage(from, { text: '⚠️ Belum ada data babu.' }, { quoted: msg });
           return;
         }
         let text = `*╭─── ⏺️ List Babu Genz*\n*╰─── 🎲 Total:* ${total}\n`;
@@ -274,7 +278,7 @@ module.exports = [
       const fuse = new Fuse(list, { keys: ['name'], threshold: 0.4 });
       const result = fuse.search(keyword);
       if (!result.length) {
-        await sock.sendMessage(from, { text: 'Komunitas tidak ditemukan.' }, { quoted: msg });
+        await sock.sendMessage(from, { text: '⚠️ Komunitas tidak ditemukan.' }, { quoted: msg });
         return;
       }
       let text = `*╭─── 🔎 Hasil dari ${keyword}:*\n`;
@@ -299,11 +303,11 @@ module.exports = [
         return;
       }
       if (db.isAkses(phone)) {
-        await sock.sendMessage(from, { text: 'Nomor sudah ada di whitelist.' }, { quoted: msg });
+        await sock.sendMessage(from, { text: '⚠️ Nomor sudah ada di whitelist.' }, { quoted: msg });
         return;
       }
       db.addAkses(phone, user);
-      await sock.sendMessage(from, { text: `Akses untuk ${phone} berhasil ditambahkan.` }, { quoted: msg });
+      await sock.sendMessage(from, { text: `✅ Akses untuk ${phone} berhasil ditambahkan.` }, { quoted: msg });
     }
   },
   {
@@ -315,12 +319,12 @@ module.exports = [
       const { sock, msg, db, isOwner } = ctx;
       const from = msg.key.remoteJid;
       if (!isOwner) {
-        await sock.sendMessage(from, { text: 'Hanya owner yang bisa pakai command ini.' }, { quoted: msg });
+        await sock.sendMessage(from, { text: '⚠️ Hanya owner yang bisa pakai command ini.' }, { quoted: msg });
         return;
       }
       const akses = db.listAkses();
       if (!akses.length) {
-        await sock.sendMessage(from, { text: 'Belum ada nomor akses.' }, { quoted: msg });
+        await sock.sendMessage(from, { text: '⚠️ Belum ada nomor akses.' }, { quoted: msg });
         return;
       }
       let text = 'List Akses:\n';
@@ -339,7 +343,7 @@ module.exports = [
       const { sock, msg, db, args, isOwner } = ctx;
       const from = msg.key.remoteJid;
       if (!isOwner) {
-        await sock.sendMessage(from, { text: 'Hanya owner yang bisa pakai command ini.' }, { quoted: msg });
+        await sock.sendMessage(from, { text: '⚠️ Hanya owner yang bisa pakai command ini.' }, { quoted: msg });
         return;
       }
       const phone = args[0]?.replace(/[^0-9]/g, '');
@@ -349,7 +353,7 @@ module.exports = [
       }
       const exists = db.isAkses(phone);
       if (!exists) {
-        await sock.sendMessage(from, { text: 'Nomor tidak ditemukan di akses.' }, { quoted: msg });
+        await sock.sendMessage(from, { text: '⚠️ Nomor tidak ditemukan di akses.' }, { quoted: msg });
         return;
       }
       db.db.prepare('DELETE FROM akses WHERE phone_number = ?').run(phone);
@@ -377,15 +381,12 @@ module.exports = [
         const { sock, msg } = ctx;
         const from = msg.key.remoteJid;
         const allCmds = module.exports;
-        // OWNER ONLY: role persis ['owner']
-        const ownerCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.length === 1 && c.role[0] === 'owner');
-        // ADMIN ONLY: role mengandung 'admin'
-        const adminCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.includes('admin'));
-        // AKSES ONLY: role mengandung 'akses' dan TIDAK mengandung 'admin'
-        const aksesCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.includes('akses') && !c.role.includes('admin'));
-        // PUBLIC: role persis ['public']
-        const publicCmds = allCmds.filter(c => Array.isArray(c.role) && c.role.length === 1 && c.role[0] === 'public');
-        // Buat menu
+        const visibleCmds = allCmds.filter(c => !c.name || !c.name.startsWith('_'));
+        const ownerCmds = visibleCmds.filter(c => Array.isArray(c.role) && c.role.length === 1 && c.role[0] === 'owner');
+        const adminCmds = visibleCmds.filter(c => Array.isArray(c.role) && c.role.includes('admin'));
+        const aksesCmds = visibleCmds.filter(c => Array.isArray(c.role) && c.role.includes('akses') && !c.role.includes('admin'));
+        const publicCmds = visibleCmds.filter(c => Array.isArray(c.role) && c.role.length === 1 && c.role[0] === 'public');
+        // Menu
         let text = '';
         if (ownerCmds.length) {
         text += '╭─── ✧ *OWNER* ✧\n';
@@ -449,7 +450,6 @@ module.exports = [
       if (rejectIfNotGroup(ctx)) return;
       const { sock, msg, db } = ctx;
       const from = msg.key.remoteJid;
-      // Cari documentMessage
       const docMsg = deepFindDocumentMessage(msg.message);
       if (!docMsg) {
         await sock.sendMessage(from, { text: `Kirim file .txt sebagai dokumen dengan command ${prefix}addtxt-risk` }, { quoted: msg });
@@ -459,7 +459,6 @@ module.exports = [
       let buffer = Buffer.from([]);
       for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
       const lines = buffer.toString('utf-8').split(/\r?\n/);
-      // Hapus semua data lama
       db.db.prepare('DELETE FROM babu').run();
       let count = 0;
       let rownum = 1;
@@ -533,7 +532,6 @@ module.exports = [
         await sock.sendMessage(msg.key.remoteJid, { text: 'Masukkan teks untuk membuat stiker.' }, { quoted: msg });
         return;
       }
-      // Kirim reaksi
       await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
       try {
         const axios = require('axios');
@@ -562,9 +560,8 @@ module.exports = [
       if (rejectIfNotGroup(ctx)) return;
       const { sock, msg, args, isGroup, userRoles } = ctx;
       const from = msg.key.remoteJid;
-      // Hanya role akses/owner, admin grup tidak boleh
       if (!userRoles.includes('akses') && !userRoles.includes('owner')) {
-        await sock.sendMessage(from, { text: 'Command ini hanya untuk role akses/owner.' }, { quoted: msg });
+        await sock.sendMessage(from, { text: '⚠️ Command ini hanya untuk role akses/owner.' }, { quoted: msg });
         return;
       }
       if (!isGroup) {
@@ -591,7 +588,7 @@ module.exports = [
       try {
       const { sock, msg } = ctx;
       const from = msg.key.remoteJid;
-      const githubUrl = 'https://github.com/Fortoises/genz-cc'; // Ganti dengan link repo kamu jika perlu
+      const githubUrl = 'https://github.com/Fortoises/genz-cc';
       const text = `*🔱 Source Code Bot Genz*\n\n` +
         `Bot ini open source!\n` +
         `Kamu bisa cek, pelajari, atau kontribusi di GitHub:\n\n` +
@@ -659,9 +656,7 @@ module.exports = [
           `*│ Bio:* ${bio}\n` +
           `*╰────────────*`;
         await sock.sendMessage(from, { text }, { quoted: msg });
-        // Info sedang mengirim gambar
         await sock.sendMessage(from, { text: `⭕ *Sedang mengirim gambar profile* [${name}]` }, { quoted: msg });
-        // Kirim gambar banner
         const bannerImgUrl = `${bannerUrl}?uid=${id}&region=id`;
         try {
           await sock.sendMessage(from, { image: { url: bannerImgUrl }, caption: `📌 *Profile*` }, { quoted: msg });
@@ -669,7 +664,6 @@ module.exports = [
           await sock.sendMessage(from, { text: 'Gagal mengambil gambar banner.' }, { quoted: msg });
         }
         await sock.sendMessage(from, { text: `⭕ *Sedang mengirim gambar outfit* [${name}]` }, { quoted: msg });
-        // Kirim gambar outfit
         const outfitImgUrl = `${outfitUrl}?uid=${id}&region=id`;
         try {
           await sock.sendMessage(from, { image: { url: outfitImgUrl }, caption: `👤 *Outfit*` }, { quoted: msg });
@@ -750,44 +744,33 @@ module.exports = [
           await sock.sendMessage(from, { text: `Format: ${prefix}tweet [teks]` }, { quoted: msg });
           return;
         }
-        // Nama WhatsApp
         const name = msg.pushName || 'User';
-        // Username: nama + 3 angka acak
         const randomNum = Math.floor(100 + Math.random() * 900);
         const username = name.replace(/\s+/g, '') + randomNum;
-        // Retweets, quotes, likes acak
         const retweets = Math.floor(100 + Math.random() * 9000);
         const quotes = Math.floor(100 + Math.random() * 9000);
         const likes = Math.floor(100 + Math.random() * 9000);
-        // Profile image (null)
         const profile = '';
-        // Request ke API
         const axios = require('axios');
         const apiUrl = `${tweetApi}?profile=${encodeURIComponent(profile)}&name=${encodeURIComponent(name)}&username=${encodeURIComponent(username)}&tweet=${encodeURIComponent(tweetText)}&image=null&theme=dark&retweets=${retweets}&quotes=${quotes}&likes=${likes}&client=Twitter%20for%20iPhone`;
         const { Sticker } = require('wa-sticker-formatter');
         const sharp = require('sharp');
-        
         await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
-        // Info proses
         await sock.sendMessage(from, { text: '*⭕ Membuat tweet, mohon tunggu...*' }, { quoted: msg });
-        // Ambil gambar
         const response = await axios.get(apiUrl, { responseType: 'arraybuffer' });
         const buffer = Buffer.from(response.data, 'binary');
-        // Resize ke 512x512, background transparan, fit: 'contain' (gambar selalu utuh)
         const resizedBuffer = await sharp(buffer)
           .resize(512, 512, {
             fit: 'contain',
             background: { r: 0, g: 0, b: 0, alpha: 0 }
           })
           .toBuffer();
-        // Buat sticker dengan metadata
         const sticker = new Sticker(resizedBuffer, {
           pack: 'Genz',
           author: 'GenzBot',
           type: 'image',
         });
         const stikerBuffer = await sticker.toBuffer();
-        // Kirim sebagai sticker
         await sock.sendMessage(from, { sticker: stikerBuffer }, { quoted: msg });
       } catch (err) {
         console.error('Error di .tweet:', err);
@@ -807,12 +790,10 @@ module.exports = [
       if (rejectIfNotGroup(ctx)) return;
       const { sock, msg, args, userRoles } = ctx;
       const from = msg.key.remoteJid;
-      // Hanya role akses/owner
       if (!userRoles.includes('akses') && !userRoles.includes('owner')) {
         await sock.sendMessage(from, { text: 'Command ini hanya untuk role akses/owner.' }, { quoted: msg });
         return;
       }
-      // Bot harus admin
       const metadata = await sock.groupMetadata(from);
       const botNumber = sock.user.id.split(':')[0] + '@s.whatsapp.net';
       const botAdmin = metadata.participants.find(p => p.id === botNumber && p.admin);
@@ -820,7 +801,6 @@ module.exports = [
         await sock.sendMessage(from, { text: 'Bot harus menjadi admin untuk mengeluarkan member.' }, { quoted: msg });
         return;
       }
-      // Ambil target: dari mention atau reply
       let target;
       if (msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.length) {
         target = msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
@@ -830,13 +810,11 @@ module.exports = [
         await sock.sendMessage(from, { text: 'Tag atau reply user yang ingin dikeluarkan.' }, { quoted: msg });
         return;
       }
-      // Tidak bisa kick owner grup
       const ownerJid = metadata.owner || (metadata.participants.find(p => p.admin === 'superadmin')?.id);
       if (target === ownerJid) {
         await sock.sendMessage(from, { text: 'Tidak bisa mengeluarkan pemilik grup!' }, { quoted: msg });
         return;
       }
-      // Tidak bisa kick diri sendiri
       if (target === msg.key.participant || target === msg.key.remoteJid) {
         await sock.sendMessage(from, { text: 'Tidak bisa mengeluarkan diri sendiri.' }, { quoted: msg });
         return;
@@ -845,7 +823,6 @@ module.exports = [
         await sock.sendMessage(from, { text: 'Tidak bisa mengeluarkan bot sendiri.' }, { quoted: msg });
         return;
       }
-      // Eksekusi kick
       try {
         await sock.groupParticipantsUpdate(from, [target], 'remove');
         await sock.sendMessage(from, { text: 'Sukses mengeluarkan member.' }, { quoted: msg });
@@ -867,26 +844,20 @@ module.exports = [
         await sock.sendMessage(from, { text: `API HD belum di-set. Owner harus set dengan ${prefix}setapi HD_API_URL [url]` }, { quoted: msg });
         return;
       }
-      // Cek reply gambar
       const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
       const imgMsg = quoted?.imageMessage || quoted?.documentMessage;
       if (!imgMsg) {
         await sock.sendMessage(from, { text: 'Reply gambar yang ingin di-HD-kan.' }, { quoted: msg });
         return;
       }
-      // Download gambar
       const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
       const stream = await downloadContentFromMessage(imgMsg, 'image');
       let buffer = Buffer.from([]);
       for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-      // Upload ke API (pakai endpoint ?image=URL, jadi upload ke img hosting dulu)
-      // Untuk simplicity, upload ke imgur/anonfiles/telegra.ph, atau jika API support upload langsung, pakai form-data
-      // Di sini diasumsikan API support upload via form-data
       const axios = require('axios');
       const FormData = require('form-data');
       const form = new FormData();
       form.append('image', buffer, { filename: 'image.jpg' });
-      // Info proses
       await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
       await sock.sendMessage(from, { text: '*⭕ Sedang memproses gambar HD, mohon tunggu..*' }, { quoted: msg });
       try {
@@ -916,24 +887,20 @@ module.exports = [
         await sock.sendMessage(from, { text: `API Ghibli belum di-set. Owner harus set dengan ${prefix}setapi GHIBLI_API_URL [url]` }, { quoted: msg });
         return;
       }
-      // Cek reply gambar
       const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
       const imgMsg = quoted?.imageMessage || quoted?.documentMessage;
       if (!imgMsg) {
         await sock.sendMessage(from, { text: 'Reply gambar yang ingin diubah ke style Ghibli.' }, { quoted: msg });
         return;
       }
-      // Download gambar
       const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
       const stream = await downloadContentFromMessage(imgMsg, 'image');
       let buffer = Buffer.from([]);
       for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-      // Upload ke API (diasumsikan support upload via form-data)
       const axios = require('axios');
       const FormData = require('form-data');
       const form = new FormData();
       form.append('image', buffer, { filename: 'image.jpg' });
-      // Info proses
       await sock.sendMessage(msg.key.remoteJid, { react: { text: '🕛', key: msg.key } });
       await sock.sendMessage(from, { text: '*⭕ Sedang memproses gambar Ghibli, mohon tunggu..*' }, { quoted: msg });
       try {
@@ -949,14 +916,143 @@ module.exports = [
         }
       }
     }
+  },
+   {
+    name: 'play',
+    description: 'Buat play peserta tournament (admin only)',
+    role: ['owner', 'admin'],
+    execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
+      const { sock, msg, db, args } = ctx;
+      const from = msg.key.remoteJid;
+      if (args.length < 2) {
+        await sock.sendMessage(from, { text: `Format: ${prefix}play [war/laga] [nama komunitas]` }, { quoted: msg });
+        return;
+      }
+      const jenis = args[0].toLowerCase();
+      if (jenis !== 'war' && jenis !== 'laga') {
+        await sock.sendMessage(from, { text: '⚠️ Jenis harus "war" atau "laga".' }, { quoted: msg });
+        return;
+      }
+      let komunitas = args.slice(1).join(' ').trim();
+      if (!komunitas) {
+        await sock.sendMessage(from, { text: '⚠️ Nama komunitas tidak boleh kosong.' }, { quoted: msg });
+        return;
+      }
+      komunitas = komunitas.toUpperCase();
+      clearExpiredRekap();
+      const existing = getRekapByKomunitas(komunitas);
+      if (existing) {
+        await sock.sendMessage(from, { text: `⚠️ Sudah ada play aktif untuk komunitas ini. Gunakan ${prefix}clearplay [nama komunitas] untuk hapus.` }, { quoted: msg });
+        return;
+      }
+      const metadata = await sock.groupMetadata(from);
+      const participants = metadata.participants || [];
+      const mentions = participants.map(p => p.id);
+      const text = `*⭕ ${jenis.toUpperCase()} lawan ${komunitas}*\n\nReply pesan ini untuk join (max 4 orang).`;
+      const sent = await sock.sendMessage(from, { text, mentions }, { quoted: msg });
+      addRekap({ jenis, komunitas, message_id: sent.key.id });
+    }
+  },
+  {
+    name: 'searchplay',
+    description: 'Cari hasil play peserta tournament',
+    role: ['public'],
+    execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
+      const { sock, msg, args } = ctx;
+      const from = msg.key.remoteJid;
+      if (args.length < 1) {
+        await sock.sendMessage(from, { text: `Format: ${prefix}searchplay [nama komunitas]` }, { quoted: msg });
+        return;
+      }
+      clearExpiredRekap();
+      let komunitas = args.join(' ').trim().toUpperCase();
+      const rekap = getRekapByKomunitas(komunitas);
+      if (!rekap) {
+        await sock.sendMessage(from, { text: '⚠️ Play tidak ditemukan atau sudah expired.' }, { quoted: msg });
+        return;
+      }
+      const peserta = JSON.parse(rekap.peserta || '[]');
+      peserta.forEach(p => {
+        if (!p.id.endsWith('@s.whatsapp.net')) {
+          p.id = p.id + '@s.whatsapp.net';
+        }
+      });
+      let text = `*${rekap.jenis.toUpperCase()} lawan ${rekap.komunitas}*\n`;
+      if (peserta.length === 0) {
+        text += 'Belum ada peserta.';
+      } else {
+        text += peserta.map(p => `@${p.id.split('@')[0]}`).join('\n');
+        text += `\nTotal: ${peserta.length}/4`;
+      }
+      await sock.sendMessage(from, { text, mentions: peserta.map(p => p.id) }, { quoted: msg });
+    }
+  },
+  {
+    name: 'clearplay',
+    description: 'Hapus play peserta tournament',
+    role: ['owner', 'admin'],
+    execute: async (ctx) => {
+      if (rejectIfNotGroup(ctx)) return;
+      const { sock, msg, args } = ctx;
+      const from = msg.key.remoteJid;
+      if (args.length < 1) {
+        await sock.sendMessage(from, { text: `Format: ${prefix}clearplay [nama komunitas]` }, { quoted: msg });
+        return;
+      }
+      let komunitas = args.join(' ').trim().toUpperCase();
+      const rekap = getRekapByKomunitas(komunitas);
+      if (!rekap) {
+        await sock.sendMessage(from, { text: '⚠️ Play tidak ditemukan atau sudah expired.' }, { quoted: msg });
+        return;
+      }
+      deleteRekapByKomunitas(komunitas);
+      await sock.sendMessage(from, { text: 'Play berhasil dihapus.' }, { quoted: msg });
+    }
+  },
+  {
+    name: '_play_reply_handler',
+    description: 'Handler internal untuk reply ke pesan play',
+    role: ['public'],
+    execute: async (ctx) => {
+      const { sock, msg, db } = ctx;
+      const from = msg.key.remoteJid;
+      const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+      const quotedId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId;
+      if (!quotedId) return;
+      clearExpiredRekap();
+      const rekap = getRekapByMessageId(quotedId);
+      if (!rekap) return;
+      let peserta = [];
+      try { peserta = JSON.parse(rekap.peserta || '[]'); } catch { peserta = []; }
+      if (peserta.length >= 4) {
+        await sock.sendMessage(from, { text: 'Slot sudah penuh (max 4).' }, { quoted: msg });
+        return;
+      }
+      let senderId = msg.key.participant || msg.key.remoteJid;
+      if (!senderId.endsWith('@s.whatsapp.net')) {
+        senderId = senderId + '@s.whatsapp.net';
+      }
+      const senderName = msg.pushName || 'User';
+      if (peserta.find(p => p.id === senderId)) {
+        peserta = peserta.filter(p => p.id !== senderId);
+      }
+      peserta.push({ id: senderId, name: senderName });
+      if (peserta.length > 4) peserta = peserta.slice(-4);
+      updateRekapPeserta(rekap.id, peserta);
+      let text = `*${rekap.jenis.toUpperCase()} lawan ${rekap.komunitas}*\n`;
+      text += peserta.map(p => `@${p.id.split('@')[0]}`).join('\n');
+      text += `\n-${4 - peserta.length}`;
+      await sock.sendMessage(from, { text, mentions: peserta.map(p => p.id) }, { quoted: msg });
+    }
   }
 ];
 
-// Tambahkan helper cooldown ke semua command
+
 const cooldownHelpers = { onlyCooldown, getCooldown, setCooldown, COOLDOWN };
 module.exports.forEach(cmd => Object.assign(cmd, cooldownHelpers));
 
-// Export helper cooldown
 module.exports.getCooldown = getCooldown;
 module.exports.setCooldown = setCooldown;
 module.exports.onlyCooldown = onlyCooldown;

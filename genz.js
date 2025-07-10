@@ -1,11 +1,9 @@
-// Tambahkan global error handler di paling atas
 process.on('unhandledRejection', (reason, promise) => {
   console.error('UNHANDLED REJECTION:', reason);
 });
 process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION:', err);
 });
-// Entry point utama bot WhatsApp setelah pairing
 require('dotenv').config();
 const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
 const pino = require("pino");
@@ -33,12 +31,23 @@ const OWNER = process.env.OWNER || '';
   sock.ev.on('messages.upsert', async ({ messages }) => {
     try {
       for (const msg of messages) {
-        // Hanya proses pesan dari grup
+
         const from = msg.key.remoteJid;
         const isGroup = from.endsWith('@g.us');
-        if (!isGroup) continue; // Abaikan DM sepenuhnya
-        // Cek owner
+        if (!isGroup) continue;
         const isOwner = OWNER.split(',').map(x=>x.trim()+"@s.whatsapp.net").includes((msg.key.participant||msg.key.remoteJid));
+        const quotedId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId;
+        if (quotedId) {
+          const { getRekapByMessageId } = db;
+          const rekap = getRekapByMessageId(quotedId);
+          if (rekap) {
+            const replyCmd = commands.find(c => c.name === '_play_reply_handler');
+            if (replyCmd) {
+              await replyCmd.execute({ sock, msg, db });
+              continue;
+            }
+          }
+        }
         await handler.onMessage(sock, msg, db, commands, PREFIX, isOwner);
       }
     } catch (err) {

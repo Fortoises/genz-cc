@@ -1,4 +1,3 @@
-// Handler event/message utama
 const getGroupAdmins = (participants = []) => participants.filter(p => p.admin).map(p => p.id);
 
 async function onMessage(sock, msg, db, commands, prefix, isOwner) {
@@ -15,7 +14,6 @@ async function onMessage(sock, msg, db, commands, prefix, isOwner) {
     const command = commands.find(c => c.name === cmdName.toLowerCase());
     if (!command) return;
 
-    // Tentukan semua role user (owner otomatis juga admin, akses, public)
     let userRoles = ['public'];
     let isAdmin = false;
     if (isOwner) {
@@ -25,24 +23,29 @@ async function onMessage(sock, msg, db, commands, prefix, isOwner) {
       try {
         const metadata = await sock.groupMetadata(from);
         const groupAdmins = getGroupAdmins(metadata.participants);
-        if (db.isAkses(senderId)) {
-          // Jika user ada di whitelist akses, role akses
-          userRoles = ['akses', 'public'];
-        } else if (groupAdmins.includes(sender)) {
-          // Jika admin grup tapi bukan akses, hanya admin
+        const isAdminGroup = groupAdmins.map(jid => jid.split('@')[0]).includes(senderId);
+        const isAkses = db.isAkses(senderId);
+        if (isAdminGroup && isAkses) {
+          userRoles = ['admin', 'akses', 'public'];
+          isAdmin = true;
+        } else if (isAdminGroup) {
           userRoles = ['admin', 'public'];
           isAdmin = true;
+        } else if (isAkses) {
+          userRoles = ['akses', 'public'];
         }
       } catch (err) {
-        // Jika gagal ambil metadata grup, fallback ke public
         userRoles = ['public'];
         isAdmin = false;
       }
     } else if (db.isAkses(senderId)) {
       userRoles = ['akses', 'public'];
     }
+    if (!userRoles || !Array.isArray(userRoles) || userRoles.length === 0) {
+      userRoles = ['public'];
+    }
 
-    // Cek izin command: jika ADA salah satu role user yang cocok dengan command.role, maka boleh akses
+
     if (!command.role.some(r => userRoles.includes(r))) {
       await sock.sendMessage(from, { text: 'Kamu tidak punya izin untuk command ini.' }, { quoted: msg });
       return;
@@ -56,7 +59,6 @@ async function onMessage(sock, msg, db, commands, prefix, isOwner) {
       return;
     }
 
-    // Context
     const ctx = { sock, msg, db, args, user: sender, isGroup, isAdmin, isOwner, userRoles, onlyCooldown, getCooldown, setCooldown, COOLDOWN };
     await command.execute(ctx);
     if (setCooldown) setCooldown(senderId, command.name, COOLDOWN);
@@ -65,7 +67,7 @@ async function onMessage(sock, msg, db, commands, prefix, isOwner) {
   }
 }
 
-// Helper: cek apakah bot admin di grup
+
 function isBotAdmin(sock, from, metadata) {
   const getNumber = jid => (jid.match(/\d+/) ? jid.match(/\d+/)[0] : jid);
   const groupAdmins = metadata.participants.filter(p => p.admin).map(p => p.id);
