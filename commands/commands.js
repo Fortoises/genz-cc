@@ -2,7 +2,7 @@ const Fuse = require('fuse.js');
 const fs = require('fs');
 const TelegramBot = require('node-telegram-bot-api');
 require('dotenv').config();
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { downloadContentFromMessage } = require('baileys-mod');
 const { isBotAdmin } = require('../handler/handler');
 const path = require('path');
 const sharp = require('sharp');

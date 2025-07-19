@@ -14,7 +14,7 @@ const {
   jidDecode,
   getAggregateVotesInPollMessage,
   proto
-} = require("@whiskeysockets/baileys");
+} = require("baileys-mod");
 const fs = require('fs');
 const pino = require('pino');
 const chalk = require('chalk');

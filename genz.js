@@ -5,7 +5,7 @@ process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION:', err);
 });
 require('dotenv').config();
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require("baileys-mod");
 const pino = require("pino");
 const path = require("path");
 const handler = require("./handler/handler");

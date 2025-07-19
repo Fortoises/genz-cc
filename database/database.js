@@ -65,7 +65,6 @@ function listAkses() {
   return db.prepare('SELECT * FROM akses').all();
 }
 
-)
 function addBabuWithId(id, name) {
   return db.prepare('INSERT OR REPLACE INTO babu (id, name) VALUES (?, ?)').run(id, name);
 }
