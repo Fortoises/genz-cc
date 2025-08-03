@@ -21,7 +21,7 @@ const OWNER = process.env.OWNER || '';
   const sock = makeWASocket({
     version,
     printQRInTerminal: false,
-    logger: pino({ level: "silent" }),
+    logger: pino({ level: "info" }),
     auth: state,
     browser: ["Ubuntu","Chrome","22.04.2"],
     getMessage: async (key) => undefined

@@ -1,4 +1,4 @@
-const getGroupAdmins = (participants = []) => participants.filter(p => p.admin).map(p => p.id);
+const getGroupAdmins = (participants = []) => participants.filter(p => p.admin != null).map(p => p.jid);
 
 async function onMessage(sock, msg, db, commands, prefix, isOwner) {
   try {
@@ -16,13 +16,21 @@ async function onMessage(sock, msg, db, commands, prefix, isOwner) {
 
     let userRoles = ['public'];
     let isAdmin = false;
+    let groupMetadata = null;
+    if (isGroup) {
+      try {
+        groupMetadata = await sock.groupMetadata(from);
+      } catch (err) {
+        console.error('Failed to get group metadata:', err);
+      }
+    }
+
     if (isOwner) {
       userRoles = ['owner', 'admin', 'akses', 'public'];
       isAdmin = true;
     } else if (isGroup) {
-      try {
-        const metadata = await sock.groupMetadata(from);
-        const groupAdmins = getGroupAdmins(metadata.participants);
+      if (groupMetadata) {
+        const groupAdmins = getGroupAdmins(groupMetadata.participants);
         const isAdminGroup = groupAdmins.map(jid => jid.split('@')[0]).includes(senderId);
         const isAkses = db.isAkses(senderId);
         if (isAdminGroup && isAkses) {
@@ -34,9 +42,6 @@ async function onMessage(sock, msg, db, commands, prefix, isOwner) {
         } else if (isAkses) {
           userRoles = ['akses', 'public'];
         }
-      } catch (err) {
-        userRoles = ['public'];
-        isAdmin = false;
       }
     } else if (db.isAkses(senderId)) {
       userRoles = ['akses', 'public'];
@@ -59,7 +64,7 @@ async function onMessage(sock, msg, db, commands, prefix, isOwner) {
       return;
     }
 
-    const ctx = { sock, msg, db, args, user: sender, isGroup, isAdmin, isOwner, userRoles, onlyCooldown, getCooldown, setCooldown, COOLDOWN };
+    const ctx = { sock, msg, db, args, user: sender, isGroup, isAdmin, isOwner, userRoles, onlyCooldown, getCooldown, setCooldown, COOLDOWN, metadata: groupMetadata };
     await command.execute(ctx);
     if (setCooldown) setCooldown(senderId, command.name, COOLDOWN);
   } catch (e) {
@@ -70,7 +75,7 @@ async function onMessage(sock, msg, db, commands, prefix, isOwner) {
 
 function isBotAdmin(sock, from, metadata) {
   const getNumber = jid => (jid.match(/\d+/) ? jid.match(/\d+/)[0] : jid);
-  const groupAdmins = metadata.participants.filter(p => p.admin).map(p => p.id);
+  const groupAdmins = (metadata.participants || []).filter(p => p.admin != null).map(p => p.jid);
   const groupAdminNumbers = groupAdmins.map(getNumber);
   const botNumber = getNumber(sock.user.id);
   return groupAdminNumbers.includes(botNumber);

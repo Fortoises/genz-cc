@@ -558,7 +558,7 @@ module.exports = [
     role: ['akses', 'owner'],
     execute: async (ctx) => {
       if (rejectIfNotGroup(ctx)) return;
-      const { sock, msg, args, isGroup, userRoles } = ctx;
+      const { sock, msg, args, isGroup, userRoles, metadata } = ctx;
       const from = msg.key.remoteJid;
       if (!userRoles.includes('akses') && !userRoles.includes('owner')) {
         await sock.sendMessage(from, { text: '⚠️ Command ini hanya untuk role akses/owner.' }, { quoted: msg });
@@ -568,7 +568,6 @@ module.exports = [
         await sock.sendMessage(from, { text: 'Command ini hanya untuk grup.' }, { quoted: msg });
         return;
       }
-      const metadata = await sock.groupMetadata(from);
       if (!isBotAdmin(sock, from, metadata)) {
         await sock.sendMessage(from, { text: 'Bot harus menjadi admin' }, { quoted: msg });
         return;
@@ -788,15 +787,14 @@ module.exports = [
     role: ['akses', 'owner'],
     execute: async (ctx) => {
       if (rejectIfNotGroup(ctx)) return;
-      const { sock, msg, args, userRoles } = ctx;
+      const { sock, msg, args, userRoles, metadata } = ctx;
       const from = msg.key.remoteJid;
       if (!userRoles.includes('akses') && !userRoles.includes('owner')) {
         await sock.sendMessage(from, { text: 'Command ini hanya untuk role akses/owner.' }, { quoted: msg });
         return;
       }
-      const metadata = await sock.groupMetadata(from);
       const botNumber = sock.user.id.split(':')[0] + '@s.whatsapp.net';
-      const botAdmin = metadata.participants.find(p => p.id === botNumber && p.admin);
+      const botAdmin = metadata.participants.find(p => p.id === botNumber && p.admin != null);
       if (!botAdmin) {
         await sock.sendMessage(from, { text: 'Bot harus menjadi admin untuk mengeluarkan member.' }, { quoted: msg });
         return;
