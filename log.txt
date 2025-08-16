@@ -1,0 +1,5 @@
+0|bot  | Error pinning message: TypeError: Cannot read properties of undefined (reading 'PinInChatType')
+0|bot  |     at Object.execute (/home/devbox/genz-cc/commands/commands.js:869:42)
+0|bot  |     at Object.onMessage (/home/devbox/genz-cc/handler/handler.js:68:19)
+0|bot  |     at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+0|bot  |     at async EventEmitter.<anonymous> (/home/devbox/genz-cc/genz.js:51:9)
